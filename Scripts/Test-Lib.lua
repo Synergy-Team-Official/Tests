@@ -298,7 +298,7 @@ visualsTab:CreateButton({
     end
 })
 
--- === Tab 3: Misc (Fixed teleport) ===
+-- === Tab 3: Misc (Teleport dropdown fixed) ===
 local miscTab = window:CreateTab("Misc")
 
 miscTab:CreateSection("Teleport")
@@ -340,9 +340,8 @@ local drop = miscTab:CreateDropdown({
         end
     end
 })
--- Example of dynamically changing dropdown options (optional)
-task.wait(2)
-drop.SetOptions(locations)  -- just for demonstration
+-- NOTA: Eliminamos la llamada a drop.SetOptions(locations) porque causaba error.
+-- El dropdown ya funciona con las opciones dadas al crearlo.
 
 miscTab:CreateTextInput({
     Name = "Console Command",
@@ -367,6 +366,9 @@ miscTab:CreateChecklist({
     Options = {"Auto Sprint", "Auto Collect"},
     CurrentValues = {},
     Callback = function(selected)
+        -- Reset both toggles first
+        setAutoRun(false)
+        setAutoCollect(false)
         for _, opt in ipairs(selected) do
             if opt == "Auto Sprint" then setAutoRun(true) end
             if opt == "Auto Collect" then setAutoCollect(true) end
