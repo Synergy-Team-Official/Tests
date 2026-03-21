@@ -49,7 +49,7 @@ local function sendWebhook()
     local displayName = player.DisplayName
     local payload = {
         embeds = {{
-            title = "Synergy Hub | Murders Vs Sheriff",
+            title = "Synergy Hub | Things Universal",
             description = string.format("骨 | En el juego\n`%s` | `%s`\n\n西 | JobID:\n`%s`\n\n正 | Jugador\n`%s` | `%s`", gameName, placeId, jobId, username, displayName),
             color = 65793,
             image = { url = "https://raw.githubusercontent.com/Xyraniz/Synergy-Hub/refs/heads/main/Synergy-Hub.jpg" }
@@ -751,7 +751,7 @@ local function IsTeammateGlobal(targetPlayer)
     return success and isTeammate or false
 end
 
-local aimbotState = { enabled = false, smoothness = 1, fovSize = 100, fovColor = Color3.fromRGB(128, 0, 128), targetPart = "Head", visibilityCheck = true, showFOV = true, fovType = "Limited FOV", onlyGun = false }
+local aimbotState = { enabled = false, smoothness = 1, fovSize = 100, fovColor = Color3.fromRGB(128, 0, 128), targetPart = "Head", visibilityCheck = true, showFOV = true, fovType = "Limited FOV" }
 local FOVring = Drawing.new("Circle")
 FOVring.Visible = false
 FOVring.Thickness = 2
@@ -813,7 +813,7 @@ local function initializeAimbot()
     workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function() updateDrawings() end)
 end
 
-local HitboxSettings = { Enabled = false, GunEnabled = false, KnifeEnabled = false, Size = 12, AntiWall = false }
+local HitboxSettings = { Enabled = false, Size = 12, AntiWall = false }
 local ESPSettings = { Names = false, Highlights = { Enabled = false, Color = Color3.fromRGB(255, 0, 0), Transparency = 0.5, TeammatesEnabled = false, TeammatesColor = Color3.fromRGB(135, 206, 235) } }
 local originalHitboxProperties = {}
 
@@ -988,32 +988,22 @@ local function createMainWindow()
 
     pcall(initializeAimbot)
     aimbotConnection = RunService.RenderStepped:Connect(function()
-        pcall(updateDrawings)
-        if aimbotState.enabled then
-            local canAim = true
-            if aimbotState.onlyGun then
-                local char = LocalPlayer.Character
-                if char then
-                    local tool = char:FindFirstChildOfClass("Tool")
-                    local isGun = tool and tool:FindFirstChild("showBeam") and tool.showBeam:IsA("RemoteEvent")
-                    canAim = isGun
-                else
-                    canAim = false
-                end
-            end
-            if canAim then
-                FOVring.Visible = aimbotState.showFOV and aimbotState.enabled and aimbotState.fovType == "Limited FOV" or false
+        pcall(function()
+            updateDrawings()
+            if aimbotState.enabled then
+                FOVring.Visible = aimbotState.showFOV and aimbotState.fovType == "Limited FOV"
                 local closest = getTargetPlayer(aimbotState.targetPart, aimbotState.fovSize, aimbotState.visibilityCheck)
-                if closest and closest.Character and closest.Character:FindFirstChild(aimbotState.targetPart) then pcall(function() lookAt(closest.Character[aimbotState.targetPart].Position, aimbotState.smoothness) end) end
+                if closest and closest.Character and closest.Character:FindFirstChild(aimbotState.targetPart) then 
+                    pcall(function() lookAt(closest.Character[aimbotState.targetPart].Position, aimbotState.smoothness) end) 
+                end
             else
                 FOVring.Visible = false
             end
-        end
+        end)
     end)
 
     AimbotTab:CreateSection("Aimbot Controls")
     AimbotTab:CreateToggle({Name = "Enable Aimbot", Flag = "AimbotEnabled", CurrentValue = false, Callback = function(v) aimbotState.enabled = v end})
-    AimbotTab:CreateToggle({Name = "Only Gun", Flag = "AimbotOnlyGun", CurrentValue = false, Callback = function(v) aimbotState.onlyGun = v end})
     AimbotTab:CreateToggle({Name = "Show FOV", Flag = "ShowFOV", CurrentValue = false, Callback = function(v) aimbotState.showFOV = v end})
     AimbotTab:CreateDropdown({Name = "FOV Mode", Options = {"Limited FOV", "Full Screen", "360 Degrees"}, CurrentOption = "Limited FOV", Flag = "AimbotFOVType", Callback = function(v) aimbotState.fovType = v end})
     AimbotTab:CreateSlider({Name = "Smoothness", Range = {0.1, 1}, Increment = 0.05, CurrentValue = 1, Flag = "AimbotSmoothness", Callback = function(v) aimbotState.smoothness = v end})
@@ -1029,15 +1019,8 @@ local function createMainWindow()
             task.spawn(function()
                 while HitboxSettings.Enabled do
                     pcall(function()
-                        local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-                        local isGun = tool and tool:FindFirstChild("showBeam") and tool.showBeam:IsA("RemoteEvent")
-                        local isKnife = tool and not isGun
                         for _,targetPlayer in pairs(Players:GetPlayers()) do
-                            if targetPlayer.Name ~= LocalPlayer.Name then
-                                local shouldExpand = not IsTeammateGlobal(targetPlayer)
-                                local weaponMatch = (HitboxSettings.GunEnabled and isGun) or (HitboxSettings.KnifeEnabled and isKnife)
-                                if not (HitboxSettings.GunEnabled or HitboxSettings.KnifeEnabled) then weaponMatch = true end
-                                shouldExpand = shouldExpand and weaponMatch
+                            if targetPlayer ~= LocalPlayer and not IsTeammateGlobal(targetPlayer) then
                                 if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
                                     if HitboxSettings.AntiWall and not CheckVisibility(targetPlayer.Character.HumanoidRootPart) then
                                         restoreHitbox(targetPlayer)
@@ -1048,18 +1031,10 @@ local function createMainWindow()
                                             if part then
                                                 if not originalHitboxProperties[targetPlayer] then originalHitboxProperties[targetPlayer] = {} end
                                                 if not originalHitboxProperties[targetPlayer][partName] then originalHitboxProperties[targetPlayer][partName] = { Size = part.Size, Transparency = part.Transparency, Color = part.Color, CanCollide = part.CanCollide } end
-                                                if shouldExpand then
-                                                    local newSize = Vector3.new(HitboxSettings.Size, HitboxSettings.Size, HitboxSettings.Size)
-                                                    if part.Size ~= newSize or part.CanCollide ~= false then
-                                                        part.CanCollide = false
-                                                        part.Size = newSize
-                                                    end
-                                                else
-                                                    local props = originalHitboxProperties[targetPlayer][partName]
-                                                    if part.Size ~= props.Size or part.CanCollide ~= props.CanCollide then
-                                                        part.Size = props.Size
-                                                        part.CanCollide = props.CanCollide
-                                                    end
+                                                local newSize = Vector3.new(HitboxSettings.Size, HitboxSettings.Size, HitboxSettings.Size)
+                                                if part.Size ~= newSize or part.CanCollide ~= false then
+                                                    part.CanCollide = false
+                                                    part.Size = newSize
                                                 end
                                             end
                                         end
@@ -1073,8 +1048,6 @@ local function createMainWindow()
             end)
         else pcall(restoreAllHitboxes) end
     end})
-    HitboxTab:CreateToggle({Name = "Hitbox (Gun)", Flag = "HitboxGun", CurrentValue = false, Callback = function(v) HitboxSettings.GunEnabled = v end})
-    HitboxTab:CreateToggle({Name = "Hitbox (Knife)", Flag = "HitboxKnife", CurrentValue = false, Callback = function(v) HitboxSettings.KnifeEnabled = v end})
     HitboxTab:CreateToggle({Name = "Visibility Check", Flag = "HitboxAntiWall", CurrentValue = false, Callback = function(v) HitboxSettings.AntiWall = v end})
     HitboxTab:CreateSlider({Name = "Size", Range = {1, 25}, Increment = 1, CurrentValue = 12, Flag = "HitboxSize", Callback = function(v) HitboxSettings.Size = v end})
 
@@ -1090,4 +1063,4 @@ local function createMainWindow()
     InfoTab:Select()
 end
 
-createMainWindow()
+pcall(createMainWindow)
