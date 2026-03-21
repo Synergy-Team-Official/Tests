@@ -1,435 +1,441 @@
---[[
-  SynergyUI Example - Complete Demo with Realistic Hacks
-  This script demonstrates all new features of SynergyUI:
-  - Text input, checklist, radio, progress bar
-  - Config saving/loading, notifications
-  - Dynamic accent color, keybind, sliders, toggles, etc.
-  - Includes a variety of common Roblox hacks (speed, noclip, fly, etc.)
-  - Auto‑saves when controls change (if ConfigFile specified)
-  
-  How to use:
-  1. Make sure SynergyUI.lua is loaded (place it in your executor or use loadstring).
-  2. Run this script.
-  3. Press X to toggle UI (default).
-  4. Experiment with all controls.
---]]
+-- Load SynergyUI from GitHub
+local SynergyUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Synergy-Hub-Official/Scripts/refs/heads/main/SynergyUI.lua"))()
 
--- Load SynergyUI (adjust path/URL as needed)
-local SynergyUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/your-repo/SynergyUI.lua"))() -- Replace with actual URL or use local path
-
--- Create window with auto‑save to "cheat_config.json"
+-- -----------------------------------------------------------------------------
+-- 1. Create the main window with config support
+-- -----------------------------------------------------------------------------
 local window = SynergyUI:CreateWindow({
-    Title = "Super Cheat Hub",
-    AccentColor = Color3.fromRGB(0, 255, 100),
-    BackgroundColor = Color3.fromRGB(15, 15, 15),
-    SidebarColor = Color3.fromRGB(20, 20, 20),
-    ToggleKey = Enum.KeyCode.X,
-    ConfigFile = "cheat_config.json"  -- Enables auto‑save/load
+    Title = "SynergyUI Test Hub",
+    AccentColor = Color3.fromRGB(0, 255, 100),   -- vibrant green
+    ConfigFile = "synergy_test_config.json",      -- auto-save all controls
+    ToggleKey = Enum.KeyCode.RightControl,        -- press RightCtrl to hide/show UI
 })
 
--- ====================== GLOBAL VARIABLES ======================
+-- -----------------------------------------------------------------------------
+-- 2. Helper functions for real game modifications
+-- -----------------------------------------------------------------------------
 local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
-local rootPart = character:WaitForChild("HumanoidRootPart")
 
--- Hack states
-local speedEnabled = false
-local speedValue = 16  -- default walk speed
-local jumpPowerEnabled = false
-local jumpPowerValue = 50
+-- Track states for toggles
 local noclipEnabled = false
-local flyEnabled = false
-local infinityJumpEnabled = false
-local godModeEnabled = false
-
--- References for loops
-local heartbeatConnection = nil
+local infiniteJumpEnabled = false
 local noclipConnection = nil
-local flyConnection = nil
-local flySpeed = 50
-local flyDirection = Vector3.new(0,0,0)
+local jumpConnection = nil
 
--- ====================== HELPER FUNCTIONS ======================
-local function applySpeed()
-    if speedEnabled then
-        humanoid.WalkSpeed = speedValue
-    else
-        humanoid.WalkSpeed = 16
+-- Noclip function (works on current and future characters)
+local function applyNoclip(state)
+    noclipEnabled = state
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
     end
-end
-
-local function applyJumpPower()
-    if jumpPowerEnabled then
-        humanoid.JumpPower = jumpPowerValue
-    else
-        humanoid.JumpPower = 50
-    end
-end
-
-local function applyGodMode()
-    if godModeEnabled then
-        character:SetAttribute("GodMode", true)
-        humanoid.MaxHealth = math.huge
-        humanoid.Health = math.huge
-        -- Prevent death
-        humanoid.HealthChanged:Connect(function(health)
-            if health <= 0 and godModeEnabled then
-                humanoid.Health = humanoid.MaxHealth
-            end
-        end)
-    else
-        character:SetAttribute("GodMode", false)
-        humanoid.MaxHealth = 100
-        if humanoid.Health > 100 then humanoid.Health = 100 end
-    end
-end
-
--- Noclip logic
-local function updateNoclip()
-    if noclipEnabled then
-        if not noclipConnection then
-            noclipConnection = RunService.Stepped:Connect(function()
-                for _, part in ipairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") then
+    if state then
+        noclipConnection = game:GetService("RunService").Stepped:Connect(function()
+            local char = player.Character
+            if char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
                         part.CanCollide = false
                     end
                 end
-            end)
-        end
-    else
-        if noclipConnection then
-            noclipConnection:Disconnect()
-            noclipConnection = nil
-            for _, part in ipairs(character:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = true
-                end
             end
-        end
+        end)
     end
 end
 
--- Fly logic
-local function startFly()
-    if flyEnabled then
-        if flyConnection then return end
-        flyConnection = RunService.Heartbeat:Connect(function()
-            local camera = workspace.CurrentCamera
-            local move = Vector3.new(0,0,0)
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + camera.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - camera.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - camera.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + camera.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0,1,0) end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move = move - Vector3.new(0,1,0) end
-            rootPart.Velocity = move * flySpeed
+-- Infinite Jump function
+local function applyInfiniteJump(state)
+    infiniteJumpEnabled = state
+    if jumpConnection then
+        jumpConnection:Disconnect()
+        jumpConnection = nil
+    end
+    if state then
+        jumpConnection = game:GetService("UserInputService").JumpRequest:Connect(function()
+            local char = player.Character
+            local hum = char and char:FindFirstChild("Humanoid")
+            if hum and hum:GetState() ~= Enum.HumanoidStateType.Jumping and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end)
+    end
+end
+
+-- Respawn character
+local function respawnCharacter()
+    if player.Character then
+        player.Character:BreakJoints()
+    end
+end
+
+-- Update walkspeed
+local function setWalkSpeed(value)
+    local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+    if hum then
+        hum.WalkSpeed = value
+    end
+end
+
+-- Update jump power
+local function setJumpPower(value)
+    local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+    if hum then
+        hum.JumpPower = value
+    end
+end
+
+-- Update gravity
+local function setGravity(value)
+    game.Workspace.Gravity = value
+end
+
+-- Update FOV (field of view)
+local function setFOV(value)
+    local camera = game.Workspace.CurrentCamera
+    camera.FieldOfView = value
+end
+
+-- Update brightness (fullbright)
+local function setFullbright(state)
+    local lighting = game:GetService("Lighting")
+    if state then
+        lighting.Brightness = 2
+        lighting.ClockTime = 12
+    else
+        lighting.Brightness = 1
+        lighting.ClockTime = 0
+    end
+end
+
+-- ESP: highlight players with a colored outline
+local espEnabled = false
+local espConnections = {}
+
+local function updateESP(state)
+    espEnabled = state
+    for _, conn in ipairs(espConnections) do
+        conn:Disconnect()
+    end
+    espConnections = {}
+    if state then
+        for _, plr in ipairs(game.Players:GetPlayers()) do
+            if plr ~= player then
+                local highlight = Instance.new("Highlight")
+                highlight.Adornee = plr.Character
+                highlight.FillTransparency = 0.5
+                highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+                highlight.Parent = plr.Character or plr
+                espConnections[#espConnections+1] = plr.CharacterAdded:Connect(function(char)
+                    local newHighlight = highlight:Clone()
+                    newHighlight.Adornee = char
+                    newHighlight.Parent = char
+                end)
+            end
+        end
+        espConnections[#espConnections+1] = game.Players.PlayerAdded:Connect(function(plr)
+            if plr ~= player then
+                local highlight = Instance.new("Highlight")
+                highlight.Adornee = plr.Character
+                highlight.FillTransparency = 0.5
+                highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+                highlight.Parent = plr.Character or plr
+                espConnections[#espConnections+1] = plr.CharacterAdded:Connect(function(char)
+                    local newHighlight = highlight:Clone()
+                    newHighlight.Adornee = char
+                    newHighlight.Parent = char
+                end)
+            end
         end)
     else
-        if flyConnection then
-            flyConnection:Disconnect()
-            flyConnection = nil
-        end
-    end
-end
-
--- Infinity jump
-local function setupInfinityJump()
-    if infinityJumpEnabled then
-        if not character:FindFirstChild("InfinityJumpHandler") then
-            local handler = Instance.new("BindableEvent")
-            handler.Name = "InfinityJumpHandler"
-            handler.Parent = character
-            handler.Event:Connect(function()
-                if infinityJumpEnabled then
-                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        for _, plr in ipairs(game.Players:GetPlayers()) do
+            if plr.Character then
+                for _, highlight in ipairs(plr.Character:GetDescendants()) do
+                    if highlight:IsA("Highlight") then highlight:Destroy() end
                 end
-            end)
-            character.Humanoid.Jump:Connect(function()
-                handler:Fire()
-            end)
-        end
-    else
-        local handler = character:FindFirstChild("InfinityJumpHandler")
-        if handler then handler:Destroy() end
-    end
-end
-
--- Update all hacks
-local function updateAllHacks()
-    applySpeed()
-    applyJumpPower()
-    updateNoclip()
-    startFly()
-    setupInfinityJump()
-    applyGodMode()
-end
-
--- ====================== CREATE TABS ======================
-local hacksTab = window:CreateTab("Hacks", nil)
-local tweaksTab = window:CreateTab("Tweaks", nil)
-local configTab = window:CreateTab("Config", nil)
-local miscTab = window:CreateTab("Misc", nil)
-
--- ====================== HACKS TAB ======================
-hacksTab:CreateSection("Movement Hacks")
-
-hacksTab:CreateToggle({
-    Name = "Speed Hack",
-    Flag = "speedToggle",
-    CurrentValue = false,
-    Callback = function(state)
-        speedEnabled = state
-        applySpeed()
-        SynergyUI:Notify("Speed hack " .. (state and "ON" or "OFF"), 2)
-        updateAllHacks()
-    end
-})
-
-hacksTab:CreateSlider({
-    Name = "Speed Value",
-    Range = {16, 250},
-    Increment = 1,
-    CurrentValue = 50,
-    Callback = function(val)
-        speedValue = val
-        if speedEnabled then applySpeed() end
-    end
-})
-
-hacksTab:CreateToggle({
-    Name = "Jump Power Hack",
-    Flag = "jumpToggle",
-    CurrentValue = false,
-    Callback = function(state)
-        jumpPowerEnabled = state
-        applyJumpPower()
-        SynergyUI:Notify("Jump power hack " .. (state and "ON" or "OFF"), 2)
-    end
-})
-
-hacksTab:CreateSlider({
-    Name = "Jump Power",
-    Range = {50, 300},
-    Increment = 1,
-    CurrentValue = 100,
-    Callback = function(val)
-        jumpPowerValue = val
-        if jumpPowerEnabled then applyJumpPower() end
-    end
-})
-
-hacksTab:CreateToggle({
-    Name = "Noclip",
-    Flag = "noclipToggle",
-    CurrentValue = false,
-    Callback = function(state)
-        noclipEnabled = state
-        updateNoclip()
-        SynergyUI:Notify("Noclip " .. (state and "ON" or "OFF"), 2)
-    end
-})
-
-hacksTab:CreateToggle({
-    Name = "Fly",
-    Flag = "flyToggle",
-    CurrentValue = false,
-    Callback = function(state)
-        flyEnabled = state
-        startFly()
-        SynergyUI:Notify("Fly " .. (state and "ON" or "OFF"), 2)
-    end
-})
-
-hacksTab:CreateSlider({
-    Name = "Fly Speed",
-    Range = {10, 200},
-    Increment = 1,
-    CurrentValue = 50,
-    Callback = function(val)
-        flySpeed = val
-    end
-})
-
-hacksTab:CreateToggle({
-    Name = "Infinity Jump",
-    Flag = "infJumpToggle",
-    CurrentValue = false,
-    Callback = function(state)
-        infinityJumpEnabled = state
-        setupInfinityJump()
-        SynergyUI:Notify("Infinity jump " .. (state and "ON" or "OFF"), 2)
-    end
-})
-
-hacksTab:CreateToggle({
-    Name = "God Mode",
-    Flag = "godToggle",
-    CurrentValue = false,
-    Callback = function(state)
-        godModeEnabled = state
-        applyGodMode()
-        SynergyUI:Notify("God mode " .. (state and "ON" or "OFF"), 2)
-    end
-})
-
-hacksTab:CreateSection("Extra Features")
-
--- Checklist: select which extra features to enable (just an example)
-local extraChecklist = hacksTab:CreateChecklist({
-    Name = "Auto Features",
-    Options = {"Auto Collect", "Auto Click", "Auto Farm"},
-    CurrentValues = {},
-    Callback = function(selected)
-        print("Extra features selected:", table.concat(selected, ", "))
-        SynergyUI:Notify("Selected: " .. table.concat(selected, ", "), 3)
-    end
-})
-
--- Radio: choose game mode
-hacksTab:CreateRadio({
-    Name = "Game Mode",
-    Options = {"Normal", "Aggressive", "Stealth"},
-    CurrentOption = "Normal",
-    Callback = function(option)
-        print("Game mode changed to:", option)
-        SynergyUI:Notify("Game mode: " .. option, 2)
-    end
-})
-
--- ====================== TWEAKS TAB ======================
-tweaksTab:CreateSection("Character Customization")
-
-tweaksTab:CreateTextInput({
-    Name = "Set Display Name",
-    Placeholder = "Enter new name...",
-    CurrentText = "",
-    Callback = function(text)
-        if text ~= "" then
-            player.DisplayName = text
-            SynergyUI:Notify("Display name set to: " .. text, 2)
-        end
-    end
-})
-
-tweaksTab:CreateColorPicker({
-    Name = "Character Color",
-    Color = Color3.fromRGB(255,255,255),
-    Callback = function(col)
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                part.Color = col
             end
         end
     end
-})
+end
 
-tweaksTab:CreateSection("Utility")
-
--- Progress bar example: simulate a charging ability
-local chargeProgress = tweaksTab:CreateProgressBar({
-    Name = "Super Charge",
-    CurrentValue = 0,
-    Callback = function(val)
-        -- you could trigger something at full charge
-        if val >= 100 then
-            SynergyUI:Notify("Charge full! Press button to release!", 2)
-        end
+-- Auto-run / Auto-sprint
+local autoRunEnabled = false
+local autoRunConnection = nil
+local function setAutoRun(state)
+    autoRunEnabled = state
+    if autoRunConnection then
+        autoRunConnection:Disconnect()
+        autoRunConnection = nil
     end
-})
-
-tweaksTab:CreateButton({
-    Name = "Release Charge",
-    Callback = function()
-        if chargeProgress.SetValue then
-            chargeProgress:SetValue(0)
-            SynergyUI:Notify("Boom! Charge released!", 2)
-        end
+    if state then
+        autoRunConnection = game:GetService("RunService").RenderStepped:Connect(function()
+            local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+            if hum and hum.MoveDirection.Magnitude > 0 then
+                hum:SetStateEnabled(Enum.HumanoidStateType.Sprinting, true)
+            end
+        end)
     end
-})
+end
 
--- Simulate charge increasing over time
-task.spawn(function()
-    while true do
-        task.wait(0.1)
-        local current = chargeProgress.SetValue and (chargeProgress:GetValue() or 0) or 0
-        if current < 100 then
-            chargeProgress:SetValue(current + 0.5)
-        end
+-- Auto-collect (simulate collecting parts)
+local autoCollectEnabled = false
+local autoCollectConnection = nil
+local function setAutoCollect(state)
+    autoCollectEnabled = state
+    if autoCollectConnection then
+        autoCollectConnection:Disconnect()
+        autoCollectConnection = nil
     end
-end)
-
--- ====================== CONFIG TAB ======================
-configTab:CreateSection("Configuration")
-
-configTab:CreateButton({
-    Name = "Save Current Config",
-    Callback = function()
-        window:SaveConfig("cheat_config.json")
-        SynergyUI:Notify("Config saved to cheat_config.json", 2)
+    if state then
+        autoCollectConnection = game:GetService("RunService").Stepped:Connect(function()
+            local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                for _, part in ipairs(game.Workspace:GetDescendants()) do
+                    if part:IsA("BasePart") and part.Name:match("Collect") and (part.Position - root.Position).Magnitude < 5 then
+                        part:Destroy()
+                        SynergyUI:Notify("Collected " .. part.Name, 2)
+                    end
+                end
+            end
+        end)
     end
-})
+end
 
-configTab:CreateButton({
-    Name = "Load Last Config",
-    Callback = function()
-        window:LoadConfig("cheat_config.json")
-        SynergyUI:Notify("Config loaded", 2)
-    end
-})
+-- -----------------------------------------------------------------------------
+-- 3. Create tabs with all controls
+-- -----------------------------------------------------------------------------
 
-configTab:CreateParagraph({
-    Title = "Info",
-    Content = "Config is automatically saved whenever you change any control (if ConfigFile was set).\nYou can also manually save/load using the buttons above.\nConfig file is stored in your executor's workspace."
-})
+-- === Tab 1: Player ===
+local playerTab = window:CreateTab("Player")
 
--- ====================== MISC TAB ======================
-miscTab:CreateSection("Accent Color")
-
-miscTab:CreateSlider({
-    Name = "Hue (0-360)",
-    Range = {0, 360},
+playerTab:CreateSection("Movement")
+playerTab:CreateSlider({
+    Name = "Walk Speed",
+    Range = {16, 100},
     Increment = 1,
-    CurrentValue = 100,
-    Callback = function(val)
-        local newColor = Color3.fromHSV(val/360, 1, 1)
-        window:SetAccentColor(newColor)
+    CurrentValue = humanoid.WalkSpeed,
+    Callback = setWalkSpeed
+})
+
+playerTab:CreateSlider({
+    Name = "Jump Power",
+    Range = {50, 150},
+    Increment = 1,
+    CurrentValue = humanoid.JumpPower,
+    Callback = setJumpPower
+})
+
+playerTab:CreateSlider({
+    Name = "Gravity",
+    Range = {20, 200},
+    Increment = 1,
+    CurrentValue = game.Workspace.Gravity,
+    Callback = setGravity
+})
+
+playerTab:CreateToggle({
+    Name = "Noclip",
+    CurrentValue = false,
+    Callback = applyNoclip
+})
+
+playerTab:CreateToggle({
+    Name = "Infinite Jump",
+    CurrentValue = false,
+    Callback = applyInfiniteJump
+})
+
+playerTab:CreateButton({
+    Name = "Respawn Character",
+    Callback = respawnCharacter
+})
+
+playerTab:CreateParagraph({
+    Title = "Info",
+    Content = "Change movement stats in real time.\nRespawn button will kill your character."
+})
+
+-- === Tab 2: Visuals ===
+local visualsTab = window:CreateTab("Visuals")
+
+visualsTab:CreateSection("Game Visuals")
+visualsTab:CreateToggle({
+    Name = "Fullbright",
+    CurrentValue = false,
+    Callback = setFullbright
+})
+
+visualsTab:CreateSlider({
+    Name = "Field of View (FOV)",
+    Range = {70, 120},
+    Increment = 1,
+    CurrentValue = game.Workspace.CurrentCamera.FieldOfView,
+    Callback = setFOV
+})
+
+visualsTab:CreateToggle({
+    Name = "ESP (Player Highlights)",
+    CurrentValue = false,
+    Callback = updateESP
+})
+
+visualsTab:CreateSection("UI Accent")
+visualsTab:CreateColorPicker({
+    Name = "UI Accent Color",
+    Color = window.accent,
+    Flag = "AccentColor",
+    Callback = function(color)
+        window:SetAccentColor(color)
     end
 })
 
-miscTab:CreateSection("Notifications")
-
-miscTab:CreateButton({
-    Name = "Test Notification",
+visualsTab:CreateButton({
+    Name = "Random Accent Color",
     Callback = function()
-        SynergyUI:Notify("This is a test notification!", 3)
+        local r, g, b = math.random(), math.random(), math.random()
+        window:SetAccentColor(Color3.new(r, g, b))
     end
 })
 
-miscTab:CreateButton({
-    Name = "Long Notification",
-    Callback = function()
-        SynergyUI:Notify("This is a longer notification that stays for 5 seconds.", 5)
+-- === Tab 3: Misc ===
+local miscTab = window:CreateTab("Misc")
+
+miscTab:CreateSection("Teleport")
+local locations = {"Spawn", "Center", "Sky"}
+local drop = miscTab:CreateDropdown({
+    Name = "Teleport to",
+    Options = locations,
+    CurrentOption = "Spawn",
+    Callback = function(opt)
+        local pos = Vector3.new(0, 5, 0)
+        if opt == "Spawn" then
+            pos = game.Workspace.SpawnLocation.Position + Vector3.new(0, 3, 0)
+        elseif opt == "Center" then
+            pos = Vector3.new(0, 5, 0)
+        elseif opt == "Sky" then
+            pos = Vector3.new(0, 500, 0)
+        end
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.CFrame = CFrame.new(pos)
+        end
+        SynergyUI:Notify("Teleported to " .. opt, 2)
     end
 })
+-- Example of dynamically changing dropdown options (optional)
+task.wait(2)
+drop.SetOptions(locations)  -- just for demonstration
 
-miscTab:CreateSection("Keybind")
+miscTab:CreateTextInput({
+    Name = "Console Command",
+    Placeholder = "Enter a command...",
+    Callback = function(text)
+        print("[User Command] " .. text)
+        SynergyUI:Notify("Command printed to console", 2)
+    end
+})
 
 miscTab:CreateKeybind({
-    Name = "Toggle UI Key",
-    CurrentKeybind = "X",
+    Name = "Keybind Test",
+    CurrentKeybind = "F",
     Callback = function(key)
-        print("Keybind pressed:", key)
-        SynergyUI:Notify("UI Toggle key is " .. key, 2)
+        SynergyUI:Notify("Pressed: " .. key, 2)
     end
 })
 
-miscTab:CreateParagraph({
-    Title = "How to use",
-    Content = "Press X to hide/show UI.\nUse sliders, toggles, dropdowns, checklists, etc.\nAll changes are auto-saved."
+miscTab:CreateSection("Auto Features")
+miscTab:CreateChecklist({
+    Name = "Auto Options",
+    Options = {"Auto Sprint", "Auto Collect"},
+    CurrentValues = {},
+    Callback = function(selected)
+        for _, opt in ipairs(selected) do
+            if opt == "Auto Sprint" then setAutoRun(true) end
+            if opt == "Auto Collect" then setAutoCollect(true) end
+        end
+    end
 })
 
--- ====================== INITIAL APPLY ======================
-updateAllHacks()
-SynergyUI:Notify("SynergyUI demo loaded! Press X to toggle.", 3)
-print("SynergyUI demo loaded. Have fun!")
+miscTab:CreateRadio({
+    Name = "Speed Mode",
+    Options = {"Normal (16)", "Fast (32)", "Super Fast (64)"},
+    CurrentOption = "Normal (16)",
+    Callback = function(opt)
+        local speed = 16
+        if opt == "Fast (32)" then speed = 32
+        elseif opt == "Super Fast (64)" then speed = 64 end
+        setWalkSpeed(speed)
+    end
+})
+
+-- Progress bar that shows current walkspeed (updates via callback)
+local speedProgress = miscTab:CreateProgressBar({
+    Name = "Current Walk Speed",
+    CurrentValue = humanoid.WalkSpeed,
+    Callback = function(val)
+        -- optional: just display
+    end
+})
+-- Update progress bar when walkspeed changes
+local function updateSpeedProgress()
+    local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+    if hum then
+        speedProgress.SetValue(hum.WalkSpeed)
+    end
+end
+game:GetService("RunService").Stepped:Connect(updateSpeedProgress)
+
+-- === Tab 4: Config ===
+local configTab = window:CreateTab("Config")
+
+configTab:CreateParagraph({
+    Title = "Configuration",
+    Content = "Your settings are automatically saved to:\n" .. window.configFile
+})
+
+configTab:CreateButton({
+    Name = "Save Config Manually",
+    Callback = function()
+        window:SaveConfig()
+        SynergyUI:Notify("Config saved", 2)
+    end
+})
+
+configTab:CreateButton({
+    Name = "Load Config Manually",
+    Callback = function()
+        window:LoadConfig()
+        SynergyUI:Notify("Config loaded", 2)
+        -- Refresh progress bar after load
+        updateSpeedProgress()
+    end
+})
+
+configTab:CreateButton({
+    Name = "Reset All Settings",
+    Callback = function()
+        -- Reset sliders, toggles, etc. by reloading default values
+        setWalkSpeed(16)
+        setJumpPower(50)
+        setGravity(196.2)
+        applyNoclip(false)
+        applyInfiniteJump(false)
+        setFullbright(false)
+        setFOV(70)
+        updateESP(false)
+        setAutoRun(false)
+        setAutoCollect(false)
+        window:LoadConfig() -- this will revert to last saved, not default.
+        -- Instead, we can manually clear all flags, but easier: destroy window and recreate?
+        -- For simplicity, we just reload config which brings last saved state.
+        -- If you want true reset, you'd need to store defaults and apply them.
+        SynergyUI:Notify("Reset to last saved config", 2)
+    end
+})
+
+-- -----------------------------------------------------------------------------
+-- 4. Show a startup notification
+-- -----------------------------------------------------------------------------
+SynergyUI:Notify("SynergyUI Test Hub loaded! Press RightControl to toggle.", 5)
