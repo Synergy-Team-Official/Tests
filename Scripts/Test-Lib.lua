@@ -298,30 +298,46 @@ visualsTab:CreateButton({
     end
 })
 
--- === Tab 3: Misc ===
+-- === Tab 3: Misc (Fixed teleport) ===
 local miscTab = window:CreateTab("Misc")
 
 miscTab:CreateSection("Teleport")
-local locations = {"Spawn", "Center", "Sky"}
+local locations = {
+    "Center (0,5,0)",
+    "Sky (0,100,0)",
+    "Random (near spawn)",
+    "Random (far)"
+}
 local drop = miscTab:CreateDropdown({
     Name = "Teleport to",
     Options = locations,
-    CurrentOption = "Spawn",
+    CurrentOption = locations[1],
     Callback = function(opt)
-        local pos = Vector3.new(0, 5, 0)
-        if opt == "Spawn" then
-            pos = game.Workspace.SpawnLocation.Position + Vector3.new(0, 3, 0)
-        elseif opt == "Center" then
+        local pos
+        if opt == locations[1] then
             pos = Vector3.new(0, 5, 0)
-        elseif opt == "Sky" then
-            pos = Vector3.new(0, 500, 0)
+        elseif opt == locations[2] then
+            pos = Vector3.new(0, 100, 0)
+        elseif opt == locations[3] then
+            -- random near spawn if it exists
+            local spawn = game.Workspace:FindFirstChild("SpawnLocation")
+            if spawn then
+                local spawnPos = spawn.Position
+                pos = Vector3.new(spawnPos.X + math.random(-20,20), spawnPos.Y + 5, spawnPos.Z + math.random(-20,20))
+            else
+                pos = Vector3.new(math.random(-50,50), 5, math.random(-50,50))
+            end
+        elseif opt == locations[4] then
+            pos = Vector3.new(math.random(-200,200), math.random(10,100), math.random(-200,200))
         end
         local char = player.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
-        if root then
+        if root and pos then
             root.CFrame = CFrame.new(pos)
+            SynergyUI:Notify("Teleported to " .. opt, 2)
+        else
+            SynergyUI:Notify("Teleport failed: character not ready", 2)
         end
-        SynergyUI:Notify("Teleported to " .. opt, 2)
     end
 })
 -- Example of dynamically changing dropdown options (optional)
@@ -416,7 +432,7 @@ configTab:CreateButton({
 configTab:CreateButton({
     Name = "Reset All Settings",
     Callback = function()
-        -- Reset sliders, toggles, etc. by reloading default values
+        -- Reset to default values
         setWalkSpeed(16)
         setJumpPower(50)
         setGravity(196.2)
@@ -427,11 +443,7 @@ configTab:CreateButton({
         updateESP(false)
         setAutoRun(false)
         setAutoCollect(false)
-        window:LoadConfig() -- this will revert to last saved, not default.
-        -- Instead, we can manually clear all flags, but easier: destroy window and recreate?
-        -- For simplicity, we just reload config which brings last saved state.
-        -- If you want true reset, you'd need to store defaults and apply them.
-        SynergyUI:Notify("Reset to last saved config", 2)
+        SynergyUI:Notify("Reset to default values", 2)
     end
 })
 
