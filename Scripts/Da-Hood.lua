@@ -391,7 +391,7 @@ local function refreshAimbotPlayers()
     if aimbotPlayerDropdown then
         aimbotPlayerDropdown:SetOptions(playerList)
         if not aimbotState.selectedPlayer or not aimbotState.selectedPlayer.Parent then
-            aimbotPlayerDropdown:SetOption("")
+            aimbotPlayerDropdown:SetValue("")
             aimbotState.selectedPlayer = nil
         end
     end
@@ -464,7 +464,7 @@ local function refreshESPPlayers()
     if espPlayerDropdown then
         espPlayerDropdown:SetOptions(playerList)
         if not ESPSettings.selectedPlayer or not ESPSettings.selectedPlayer.Parent then
-            espPlayerDropdown:SetOption("")
+            espPlayerDropdown:SetValue("")
             ESPSettings.selectedPlayer = nil
         end
     end
@@ -627,3 +627,6 @@ FunTab:CreateButton({ Name = "Buy Sledgehammer", Callback = function() loadstrin
 FunTab:CreateButton({ Name = "Sonic", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/GjCuV5D5"))() end })
 FunTab:CreateButton({ Name = "Neckgrab", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/3Hbt189D"))() end })
 FunTab:CreateButton({ Name = "Invisible", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/3Rnd9rHf"))() end })
+
+refreshAimbotPlayers()
+refreshESPPlayers()
