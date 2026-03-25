@@ -86,7 +86,7 @@ local function IsTeammateGlobal(targetPlayer)
     return success and isTeammate or false
 end
 
-local aimbotState = { enabled = false, smoothness = 1, fovSize = 100, fovColor = Color3.fromRGB(128, 0, 128), targetPart = "Head", visibilityCheck = true, showFOV = true, fovType = "Limited FOV" }
+local aimbotState = { enabled = false, smoothness = 1, fovSize = 100, fovColor = Color3.fromRGB(128, 0, 128), targetPart = "Head", visibilityCheck = true, showFOV = true, fovType = "Limited FOV", onlySelected = false, selectedPlayer = nil }
 local FOVring = Drawing.new("Circle")
 FOVring.Visible = false
 FOVring.Thickness = 2
@@ -109,6 +109,31 @@ local function lookAt(target, smoothness)
 end
 
 local function getTargetPlayer(targetPartStr, fov, visibilityCheck)
+    if aimbotState.onlySelected and aimbotState.selectedPlayer then
+        local player = aimbotState.selectedPlayer
+        if player and player ~= LocalPlayer and not IsTeammateGlobal(player) then
+            local character = player.Character
+            if character then
+                local part = character:FindFirstChild(targetPartStr)
+                local humanoid = character:FindFirstChildOfClass("Humanoid")
+                if part and humanoid and humanoid.Health > 0 then
+                    local Cam = workspace.CurrentCamera
+                    local ePos, onScreen = Cam:WorldToViewportPoint(part.Position)
+                    if aimbotState.fovType == "Limited FOV" then
+                        local playerMousePos = Cam.ViewportSize / 2
+                        local screenDist = (Vector2.new(ePos.X, ePos.Y) - playerMousePos).Magnitude
+                        if screenDist > fov then return nil end
+                    end
+                    if aimbotState.fovType == "Full Screen" and not onScreen then return nil end
+                    if visibilityCheck then
+                        if not CheckVisibility(part) then return nil end
+                    end
+                    return player
+                end
+            end
+        end
+        return nil
+    end
     local candidates = {}
     local Cam = workspace.CurrentCamera
     local playerMousePos = Cam.ViewportSize / 2
@@ -149,7 +174,7 @@ local function initializeAimbot()
 end
 
 local HitboxSettings = { Enabled = false, Size = 12, AntiWall = false }
-local ESPSettings = { Names = false, Highlights = { Enabled = false, Color = Color3.fromRGB(255, 0, 0), Transparency = 0.5, TeammatesEnabled = false, TeammatesColor = Color3.fromRGB(135, 206, 235) } }
+local ESPSettings = { Names = false, Highlights = { Enabled = false, Color = Color3.fromRGB(255, 0, 0), Transparency = 0.5, TeammatesEnabled = false, TeammatesColor = Color3.fromRGB(135, 206, 235) }, onlySelected = false, selectedPlayer = nil }
 local originalHitboxProperties = {}
 
 local function restoreHitbox(targetPlayer)
@@ -243,6 +268,17 @@ Players.PlayerAdded:Connect(function(newPlayer) if newPlayer ~= LocalPlayer then
 local function updateESP()
     for _, targetPlayer in pairs(Players:GetPlayers()) do
         if targetPlayer ~= LocalPlayer then
+            if ESPSettings.onlySelected and ESPSettings.selectedPlayer then
+                if targetPlayer ~= ESPSettings.selectedPlayer then
+                    if highlights[targetPlayer] then highlights[targetPlayer].Enabled = false end
+                    local head = targetPlayer.Character and targetPlayer.Character:FindFirstChild("Head")
+                    if head then
+                        local nameTag = head:FindFirstChild("NameTagESP")
+                        if nameTag then nameTag.NameLabel.TextTransparency = 1 end
+                    end
+                    continue
+                end
+            end
             if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
                 local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
                 if humanoid and humanoid.Health <= 0 then
@@ -343,6 +379,32 @@ aimbotConnection = RunService.RenderStepped:Connect(function()
 end)
 
 AimbotTab:CreateToggle({ Name = "Enable Aimbot", CurrentValue = false, Callback = function(v) aimbotState.enabled = v end })
+AimbotTab:CreateToggle({ Name = "Only Select Player", CurrentValue = false, Callback = function(v) aimbotState.onlySelected = v end })
+local aimbotPlayerDropdown
+local function refreshAimbotPlayers()
+    local playerList = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(playerList, player.Name)
+        end
+    end
+    if aimbotPlayerDropdown then
+        aimbotPlayerDropdown:SetOptions(playerList)
+        if not aimbotState.selectedPlayer or not aimbotState.selectedPlayer.Parent then
+            aimbotPlayerDropdown:SetOption("")
+            aimbotState.selectedPlayer = nil
+        end
+    end
+end
+aimbotPlayerDropdown = AimbotTab:CreateDropdown({ Name = "Select Player", Options = {}, CurrentOption = "", Callback = function(v)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Name == v then
+            aimbotState.selectedPlayer = player
+            break
+        end
+    end
+end })
+AimbotTab:CreateButton({ Name = "Refresh Players", Callback = function() refreshAimbotPlayers() end })
 AimbotTab:CreateToggle({ Name = "Show FOV", CurrentValue = false, Callback = function(v) aimbotState.showFOV = v end })
 AimbotTab:CreateDropdown({ Name = "FOV Mode", Options = {"Limited FOV", "Full Screen", "360 Degrees"}, CurrentOption = "Limited FOV", Callback = function(v) aimbotState.fovType = v end })
 AimbotTab:CreateSlider({ Name = "Smoothness", Range = {0.1, 1}, Increment = 0.05, CurrentValue = 1, Callback = function(v) aimbotState.smoothness = v end })
@@ -390,6 +452,32 @@ HitboxTab:CreateToggle({ Name = "Visibility Check", CurrentValue = false, Callba
 HitboxTab:CreateSlider({ Name = "Size", Range = {1, 25}, Increment = 1, CurrentValue = 12, Callback = function(v) HitboxSettings.Size = v end })
 
 VisualTab:CreateToggle({ Name = "Show Names", CurrentValue = false, Callback = function(v) ESPSettings.Names = v end })
+VisualTab:CreateToggle({ Name = "Only Select Player", CurrentValue = false, Callback = function(v) ESPSettings.onlySelected = v end })
+local espPlayerDropdown
+local function refreshESPPlayers()
+    local playerList = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(playerList, player.Name)
+        end
+    end
+    if espPlayerDropdown then
+        espPlayerDropdown:SetOptions(playerList)
+        if not ESPSettings.selectedPlayer or not ESPSettings.selectedPlayer.Parent then
+            espPlayerDropdown:SetOption("")
+            ESPSettings.selectedPlayer = nil
+        end
+    end
+end
+espPlayerDropdown = VisualTab:CreateDropdown({ Name = "Select Player", Options = {}, CurrentOption = "", Callback = function(v)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Name == v then
+            ESPSettings.selectedPlayer = player
+            break
+        end
+    end
+end })
+VisualTab:CreateButton({ Name = "Refresh Players", Callback = function() refreshESPPlayers() end })
 VisualTab:CreateToggle({ Name = "Enable Highlights (Enemies)", CurrentValue = false, Callback = function(v)
     ESPSettings.Highlights.Enabled = v
     if not v and not ESPSettings.Highlights.TeammatesEnabled then
