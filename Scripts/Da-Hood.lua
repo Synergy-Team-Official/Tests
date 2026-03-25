@@ -318,10 +318,11 @@ local AimbotTab = Window:CreateTab("Aimbot")
 local HitboxTab = Window:CreateTab("Hitbox")
 local VisualTab = Window:CreateTab("ESP")
 local MiscTab = Window:CreateTab("Misc")
+local FunTab = Window:CreateTab("Fun Stuff")
 
 InfoTab:CreateSection("Information")
-InfoTab:CreateParagraph({Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in Murders vs Sheriff."})
-InfoTab:CreateParagraph({Title = "Credits", Content = "Xyraniz\nSynergy Team\nCustom UI Port"})
+InfoTab:CreateParagraph({Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in games."})
+InfoTab:CreateParagraph({Title = "Credits", Content = "Xyraniz\nSynergy Team"})
 InfoTab:CreateButton({Name = "Discord Server", Callback = function() setclipboard("discord.gg/nCNASmNRTE") end})
 InfoTab:CreateKeybind({Name = "Menu Keybind", CurrentKeybind = "X", Flag = "MenuKeybind", Callback = function(key) Window:Toggle() end})
 
@@ -529,3 +530,12 @@ MiscTab:CreateKeybind({
         toggleMacro()
     end
 })
+
+FunTab:CreateButton({ Name = "Spiderman", Callback = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/AgentScriptorUser/AgentScriptorUser/main/Da%20Strike%20web%20swing%20sound"))() end })
+FunTab:CreateButton({ Name = "Portal Gun", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/c3jQjUyx"))() end })
+FunTab:CreateButton({ Name = "Tornado", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/1Q8UeuEM"))() end })
+FunTab:CreateButton({ Name = "Holy Cross", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/34DKpNQ9"))() end })
+FunTab:CreateButton({ Name = "Buy Sledgehammer", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/E762Nk70"))() end })
+FunTab:CreateButton({ Name = "Sonic", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/GjCuV5D5"))() end })
+FunTab:CreateButton({ Name = "Neckgrab", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/3Hbt189D"))() end })
+FunTab:CreateButton({ Name = "Invisible", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/3Rnd9rHf"))() end })
