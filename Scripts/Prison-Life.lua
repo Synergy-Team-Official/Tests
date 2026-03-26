@@ -16,6 +16,13 @@ local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local Camera = workspace.CurrentCamera
 
+local IS_MOBILE = UserInputService.TouchEnabled
+local IS_DESKTOP = UserInputService.MouseEnabled
+
+local GunRemotes = ReplicatedStorage:FindFirstChild("GunRemotes")
+local ShootEvent = GunRemotes and GunRemotes:FindFirstChild("ShootEvent")
+local FuncReload = GunRemotes and GunRemotes:FindFirstChild("FuncReload")
+
 getgenv().SilentAimSettings = {
     Enabled = false,
     ClassName = "Universal Silent Aim",
@@ -57,1000 +64,929 @@ getgenv().SilentAimSettings = {
     EnableNameTargeting = false,
     WhitelistedNames = {},
     BlacklistedNames = {},
-    TargetMode = "Players"
+    TargetMode = "Players",
+    -- New PC Silent Aim specific settings
+    MissSpread = 5,
+    DeathCheck = true,
+    ForceFieldCheck = true,
+    AutoReload = true,
+    ShowTargetLine = false,
+    RandomAimParts = false,
+    DynamicFOV = false
 }
 
 local SilentAimSettings = getgenv().SilentAimSettings
 
-local IS_MOBILE = UserInputService.TouchEnabled
-local IS_DESKTOP = UserInputService.MouseEnabled
+local GetPlayers = Players.GetPlayers
+local WorldToViewportPoint = Camera.WorldToViewportPoint
+local FindFirstChild = game.FindFirstChild
+local RenderStepped = RunService.RenderStepped
+local GetMouseLocation = UserInputService.GetMouseLocation
 
-if IS_DESKTOP then
-    SilentAimSettings.MissSpread = 5
-    SilentAimSettings.AutoReload = true
-    SilentAimSettings.DynamicFOV = false
-    SilentAimSettings.DeathCheck = true
-    SilentAimSettings.ForceFieldCheck = true
-    SilentAimSettings.RandomAimParts = false
-    SilentAimSettings.AimPartsList = {"Head", "Torso", "HumanoidRootPart", "LeftArm", "RightArm", "LeftLeg", "RightLeg"}
+local resume = coroutine.resume
+local create = coroutine.create
 
-    local WallCheckParams = RaycastParams.new()
-    WallCheckParams.FilterType = Enum.RaycastFilterType.Exclude
-    WallCheckParams.IgnoreWater = true
-    WallCheckParams.RespectCanCollide = false
+local ValidTargetParts = {"Head", "HumanoidRootPart"}
+local PredictionAmount = 0.165
 
-    local SilentAimFOV = nil
-    local TargetLine = nil
-    local CurrentSilentAimTarget = nil
-    local IsSilentAimShooting = false
-    local LastShot = 0
+local currentTargetPart = nil
+local currentHighlight = nil
+local currentRotationAngle = 0
+local currentIndicatorHue = 0
+local npcList = {}
+local targetMap = {}
+local avatarCache = {}
+local recentShots = {}
+local pendingDamage = {}
 
-    local function GetBodyPart(character, partName)
-        if not character then return nil end
-        local directPart = character:FindFirstChild(partName)
-        if directPart then return directPart end
+local lockedTargetObject = nil
 
-        local partMappings = {
-            ["Torso"] = {"Torso", "UpperTorso", "LowerTorso"},
-            ["LeftArm"] = {"Left Arm", "LeftUpperArm", "LeftLowerArm", "LeftHand"},
-            ["RightArm"] = {"Right Arm", "RightUpperArm", "RightLowerArm", "RightHand"},
-            ["LeftLeg"] = {"Left Leg", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot"},
-            ["RightLeg"] = {"Right Leg", "RightUpperLeg", "RightLowerLeg", "RightFoot"}
-        }
+local target_indicator_circle = Drawing.new("Circle")
+target_indicator_circle.Visible = false; target_indicator_circle.ZIndex = 1000; target_indicator_circle.Thickness = 2; target_indicator_circle.Filled = false
 
-        local mappings = partMappings[partName]
-        if mappings then
-            for _, name in ipairs(mappings) do
-                local part = character:FindFirstChild(name)
-                if part then return part end
+local target_indicator_lines = {}
+for i = 1, 5 do 
+    local line = Drawing.new("Line")
+    line.Visible = false
+    line.ZIndex = 1000
+    line.Thickness = 2
+    table.insert(target_indicator_lines, line) 
+end
+
+local overhead_info_texts = {
+    Name = Drawing.new("Text"),
+    Health = Drawing.new("Text"),
+    Distance = Drawing.new("Text"),
+    Category = Drawing.new("Text")
+}
+
+for _, text in pairs(overhead_info_texts) do
+    text.Visible = false
+    text.ZIndex = 1001
+    text.Font = Drawing.Fonts.Plex
+    text.Size = 14
+    text.Color = Color3.fromRGB(255, 255, 255)
+    text.Center = true
+    text.Outline = true
+end
+
+local panel_info_bg = Drawing.new("Square")
+panel_info_bg.Visible = false
+panel_info_bg.ZIndex = 1002
+panel_info_bg.Color = Color3.fromRGB(0, 0, 0)
+panel_info_bg.Thickness = 0
+panel_info_bg.Filled = true
+panel_info_bg.Transparency = 0.5
+
+local panel_info_texts = {
+    Name = Drawing.new("Text"),
+    Health = Drawing.new("Text"),
+    Distance = Drawing.new("Text"),
+    Category = Drawing.new("Text")
+}
+
+for _, text in pairs(panel_info_texts) do
+    text.Visible = false
+    text.ZIndex = 1003
+    text.Font = Drawing.Fonts.Plex
+    text.Size = 14
+    text.Color = Color3.fromRGB(255, 255, 255)
+    text.Center = false
+    text.Outline = true
+end
+
+local FOVCircleGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
+FOVCircleGui.Name = "FOVCircleGui"
+FOVCircleGui.ResetOnSpawn = false
+FOVCircleGui.IgnoreGuiInset = true
+FOVCircleGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local FOVCircleFrame = Instance.new("Frame", FOVCircleGui)
+FOVCircleFrame.Name = "FOVCircleFrame"
+FOVCircleFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVCircleFrame.Position = UDim2.fromScale(0.5, 0.5)
+FOVCircleFrame.BackgroundTransparency = 1
+
+local FOVStroke = Instance.new("UIStroke", FOVCircleFrame)
+FOVStroke.Name = "FOVStroke"
+FOVStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+FOVStroke.Thickness = 1
+FOVStroke.Transparency = 0.5
+
+local FOVCorner = Instance.new("UICorner", FOVCircleFrame)
+FOVCorner.Name = "FOVCorner"
+FOVCorner.CornerRadius = UDim.new(1, 0)
+
+local IndependentPanelGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
+IndependentPanelGui.Name = "IndependentPanelGui"
+IndependentPanelGui.ResetOnSpawn = false
+IndependentPanelGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local IndependentPanelFrame = Instance.new("Frame", IndependentPanelGui)
+IndependentPanelFrame.Name = "PanelFrame"
+IndependentPanelFrame.Size = UDim2.fromOffset(160, 100)
+IndependentPanelFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+IndependentPanelFrame.BackgroundTransparency = 0.3
+IndependentPanelFrame.BorderSizePixel = 1
+IndependentPanelFrame.BorderColor3 = Color3.new(1,1,1)
+IndependentPanelFrame.Visible = false
+IndependentPanelFrame.Active = true
+
+local IPCorner = Instance.new("UICorner", IndependentPanelFrame)
+IPCorner.CornerRadius = UDim.new(0, 4)
+
+local IPListLayout = Instance.new("UIListLayout", IndependentPanelFrame)
+IPListLayout.Padding = UDim.new(0, 5)
+IPListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+IPListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+IPListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+
+local independent_panel_texts = {}
+for i, name in ipairs({"Name", "Health", "Distance", "Category"}) do
+    local label = Instance.new("TextLabel", IndependentPanelFrame)
+    label.Name = name
+    label.Size = UDim2.new(1, -10, 0, 15)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.SourceSans
+    label.TextSize = 14
+    label.TextColor3 = Color3.new(1,1,1)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.LayoutOrder = i
+    independent_panel_texts[name] = label
+end
+
+IndependentPanelFrame.InputBegan:Connect(function(input) 
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and IndependentPanelFrame.Draggable then 
+        IndependentPanelFrame.Position = UDim2.fromOffset(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y) 
+    end 
+end)
+
+IndependentPanelFrame.InputEnded:Connect(function(input) 
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and IndependentPanelFrame.Draggable then 
+        SilentAimSettings.IndependentPanelPosition = IndependentPanelFrame.Position.X.Offset .. "," .. IndependentPanelFrame.Position.Y.Offset 
+    end 
+end)
+
+local ExpectedArguments = {
+    FindPartOnRayWithIgnoreList = { ArgCountRequired = 3, Args = {"Instance", "Ray", "table", "boolean", "boolean"} },
+    FindPartOnRayWithWhitelist = { ArgCountRequired = 3, Args = {"Instance", "Ray", "table", "boolean"} },
+    FindPartOnRay = { ArgCountRequired = 2, Args = {"Instance", "Ray", "Instance", "boolean", "boolean"} },
+    Raycast = { ArgCountRequired = 3, Args = {"Instance", "Vector3", "Vector3", "RaycastParams"} }
+}
+
+local HitSounds = {
+    ["bell"] = "rbxassetid://8679627751",
+    ["metal"] = "rbxassetid://3125624765",
+    ["click"] = "rbxassetid://17755696142",
+    ["exp"] = "rbxassetid://10070796384"
+}
+
+local rainbowColor = Color3.fromHSV(0, 1, 1)
+task.spawn(function()
+    while task.wait() do
+        local hue = (tick() % 6) / 6
+        rainbowColor = Color3.fromHSV(hue, 1, 1)
+    end
+end)
+
+local function playHitSound(soundId)
+    local sound = Instance.new("Sound")
+    sound.Parent = CoreGui
+    sound.SoundId = soundId
+    sound.Volume = 0.6
+    sound:Play()
+    Debris:AddItem(sound, sound.TimeLength + 0.2)
+end
+
+function CalculateChance(Percentage)
+    Percentage = math.floor(Percentage)
+    return math.random() <= Percentage / 100
+end
+
+local function getPositionOnScreen(Vector)
+    local Vec3, OnScreen = WorldToViewportPoint(Camera, Vector)
+    return Vector2.new(Vec3.X, Vec3.Y), OnScreen
+end
+
+local function ValidateArguments(Args, RayMethod)
+    local Matches = 0
+    if #Args < RayMethod.ArgCountRequired then return false end
+    for Pos, Argument in next, Args do 
+        if typeof(Argument) == RayMethod.Args[Pos] then 
+            Matches = Matches + 1 
+        end 
+    end
+    return Matches >= RayMethod.ArgCountRequired
+end
+
+local function getDirection(Origin, Position)
+    return (Position - Origin).Unit * 1000
+end
+
+local function isNPC(obj)
+    return obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 and obj:FindFirstChild("HumanoidRootPart") and not Players:GetPlayerFromCharacter(obj)
+end
+
+function getTargetCategory(character)
+    if not character then return "None" end
+
+    if Players:GetPlayerFromCharacter(character) then
+        return "Player"
+    end
+
+    if SilentAimSettings.EnableNameTargeting then
+        local name = character.Name:lower()
+        for _, whitelistedName in ipairs(SilentAimSettings.WhitelistedNames) do
+            if whitelistedName and whitelistedName ~= "" and string.find(name, whitelistedName:lower(), 1, true) then
+                return "Whitelisted"
             end
         end
-
-        return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Head")
+    end
+    
+    if character:FindFirstChild("Humanoid") then
+         return "NPC"
     end
 
-    local function GetTargetPart(character)
-        if not character then return nil end
-        local partName
-        if SilentAimSettings.RandomAimParts then
-            local partsList = SilentAimSettings.AimPartsList
-            if partsList and #partsList > 0 then
-                partName = partsList[math.random(1, #partsList)]
-            else
-                partName = "Head"
-            end
-        else
-            partName = SilentAimSettings.TargetPart
-        end
-        return GetBodyPart(character, partName)
-    end
+    return "Unknown"
+end
 
-    local function GetMissPosition(targetPos)
-        local offset = Vector3.new(
-            math.random(-100, 100),
-            math.random(-100, 100),
-            math.random(-100, 100)
-        ).Unit * SilentAimSettings.MissSpread
-        return targetPos + offset
-    end
+local function updateNPCs()
+    local newNpcList = {}
+    local addedNpcs = {} 
 
-    local function IsPlayerDead(plr)
-        if not plr or not plr.Character then return true end
-        local hum = plr.Character:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then return true end
-        return false
-    end
-
-    local function HasForceField(plr)
-        if not plr or not plr.Character then return false end
-        return plr.Character:FindFirstChildOfClass("ForceField") ~= nil
-    end
-
-    local function IsWallBetween(startPos, endPos, targetCharacter)
-        local myChar = Player.Character
-        if not myChar then return true end
-        WallCheckParams.FilterDescendantsInstances = { myChar }
-        local direction = endPos - startPos
-        local distance = direction.Magnitude
-        local result = workspace:Raycast(startPos, direction.Unit * distance, WallCheckParams)
-
-        if not result then return false end
-        local hitPart = result.Instance
-        if targetCharacter and hitPart:IsDescendantOf(targetCharacter) then return false end
-
-        if hitPart.Transparency >= 0.8 or not hitPart.CanCollide then
-            local newStart = result.Position + direction.Unit * 0.1
-            local remainingDist = (endPos - newStart).Magnitude
-            if remainingDist > 0.5 then
-                local newResult = workspace:Raycast(newStart, direction.Unit * remainingDist, WallCheckParams)
-                if not newResult then return false end
-                if targetCharacter and newResult.Instance:IsDescendantOf(targetCharacter) then return false end
-            else
-                return false
-            end
-        end
-        return true
-    end
-
-    local function IsValidTarget(plr)
-        if not plr or plr == Player or not plr.Character then return false end
-        local targetPart = GetTargetPart(plr.Character)
-        if not targetPart then return false end
-        if SilentAimSettings.DeathCheck and IsPlayerDead(plr) then return false end
-        if SilentAimSettings.ForceFieldCheck and HasForceField(plr) then return false end
-        if SilentAimSettings.TeamCheck and plr.Team == Player.Team then return false end
-
-        if SilentAimSettings.VisibleCheck then
-            local myChar = Player.Character
-            local myHead = myChar and myChar:FindFirstChild("Head")
-            if myHead then
-                if IsWallBetween(myHead.Position, targetPart.Position, plr.Character) then return false end
-            end
-        end
-        return true
-    end
-
-    local function RollHitChance()
-        if SilentAimSettings.HitChance >= 100 then return true end
-        if SilentAimSettings.HitChance <= 0 then return false end
-        return math.random(1, 100) <= SilentAimSettings.HitChance
-    end
-
-    local function GetClosestTarget(screenCenter)
-        local camera = workspace.CurrentCamera
-        if not camera then return nil end
-
-        local closest = nil
-        local shortestDist = SilentAimSettings.FOVRadius
-
-        for _, plr in pairs(Players:GetPlayers()) do
-            if IsValidTarget(plr) then
-                local targetPart = GetTargetPart(plr.Character)
-                if targetPart then
-                    local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-                        if dist < shortestDist then
-                            shortestDist = dist
-                            closest = plr
+    if SilentAimSettings.EnableNameTargeting and #SilentAimSettings.WhitelistedNames > 0 then
+        for _, model in ipairs(workspace:GetDescendants()) do
+            if isNPC(model) then
+                for _, substring in ipairs(SilentAimSettings.WhitelistedNames) do
+                    if substring and substring ~= "" and string.find(model.Name:lower(), substring:lower(), 1, true) then
+                        if not addedNpcs[model] then
+                            table.insert(newNpcList, model)
+                            addedNpcs[model] = true
+                            break 
                         end
                     end
                 end
             end
         end
-        return closest
     end
 
-    local function GetEquippedGun()
-        local char = Player.Character
-        if not char then return nil end
-        for _, tool in pairs(char:GetChildren()) do
-            if tool:IsA("Tool") and tool:GetAttribute("ToolType") == "Gun" then
+    for _, v in ipairs(workspace:GetChildren()) do
+        if isNPC(v) then
+            if not addedNpcs[v] then
+                table.insert(newNpcList, v)
+                addedNpcs[v] = true
+            end
+        end
+    end
+    
+    npcList = newNpcList
+end
+
+local function isBlacklisted(name)
+    local lowerName = name:lower()
+    for _, blacklistedName in ipairs(SilentAimSettings.BlacklistedNames) do
+        if blacklistedName:lower() == lowerName then
+            return true
+        end
+    end
+    return false
+end
+
+local function isPartVisible(part, customOrigin)
+    if not part then return false end
+    local localCharacter = Player.Character
+    if not localCharacter then return false end
+    local origin = customOrigin or Camera.CFrame.Position
+    local direction = part.Position - origin
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.FilterDescendantsInstances = {localCharacter, part.Parent}
+    local raycastResult = workspace:Raycast(origin, direction.Unit * direction.Magnitude, raycastParams)
+    return not raycastResult
+end
+
+local function GetOnScreenPosition(v3)
+    local pos, vis = WorldToViewportPoint(Camera, v3)
+    return Vector2.new(pos.X, pos.Y), vis
+end
+
+local function GetFovCenter()
+    return SilentAimSettings.FixedFOV and (Camera.ViewportSize / 2) or GetMouseLocation(UserInputService)
+end
+
+-- NPC target functions (keep for mobile)
+local function getClosestPlayer()
+    local LocalPlayerCharacter = Player.Character
+    if not LocalPlayerCharacter or not LocalPlayerCharacter:FindFirstChild("HumanoidRootPart") then return nil end
+    local localRoot = LocalPlayerCharacter.HumanoidRootPart
+    
+    local fovCenter = GetFovCenter()
+    local candidates = {}
+    
+    for _, PlayerObj in ipairs(GetPlayers(Players)) do
+        if PlayerObj ~= Player and not (SilentAimSettings.TeamCheck and PlayerObj.Team == Player.Team) and not isBlacklisted(PlayerObj.Name) then
+            local Character = PlayerObj.Character
+            local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+            if Character and Humanoid and Humanoid.Health > 0 then
+                local partForChecks = Character:FindFirstChild(SilentAimSettings.TargetPart) or Character:FindFirstChild("HumanoidRootPart")
+                if not partForChecks then continue end
+
+                if not (SilentAimSettings.VisibleCheck and not isPartVisible(partForChecks, LocalPlayerCharacter.Head.Position)) then
+                    local physicalDist = (localRoot.Position - partForChecks.Position).Magnitude
+                    if physicalDist <= SilentAimSettings.MaxDistance then
+                        if SilentAimSettings.PriorityMode == "Closest Player (No FOV)" then
+                            table.insert(candidates, {character = Character, fov = math.huge, dist = physicalDist, health = Humanoid.Health})
+                        else
+                            local ScreenPosition, OnScreen = GetOnScreenPosition(partForChecks.Position)
+                            if OnScreen then
+                                local fovDist = (fovCenter - ScreenPosition).Magnitude
+                                if fovDist <= SilentAimSettings.FOVRadius then
+                                    table.insert(candidates, {character = Character, fov = fovDist, dist = physicalDist, health = Humanoid.Health})
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if #candidates == 0 then return nil end
+    table.sort(candidates, function(a, b)
+        if SilentAimSettings.PriorityMode == "Lowest Health" then
+            return a.health < b.health
+        elseif SilentAimSettings.PriorityMode == "Closest Distance" or SilentAimSettings.PriorityMode == "Closest Player (No FOV)" then
+            return a.dist < b.dist
+        else
+            return a.fov < b.fov
+        end
+    end)
+    return candidates[1].character
+end
+
+local function getNPCTarget()
+    local LocalPlayerCharacter = Player.Character
+    if not LocalPlayerCharacter or not LocalPlayerCharacter:FindFirstChild("HumanoidRootPart") then return nil end
+    local localRoot = LocalPlayerCharacter.HumanoidRootPart
+
+    local fovCenter = GetFovCenter()
+    local candidates = {}
+
+    for _, NPCModel in ipairs(npcList) do
+        if not (SilentAimSettings.TeamCheck and NPCModel.Team and NPCModel.Team == Player.Team) and not isBlacklisted(NPCModel.Name) then
+            local Humanoid = NPCModel and NPCModel:FindFirstChildOfClass("Humanoid")
+            if NPCModel and Humanoid and Humanoid.Health > 0 then
+                local partForChecks = NPCModel:FindFirstChild(SilentAimSettings.TargetPart) or NPCModel.PrimaryPart or NPCModel:FindFirstChild("HumanoidRootPart")
+                if not partForChecks then continue end
+
+                if not (SilentAimSettings.VisibleCheck and not isPartVisible(partForChecks, LocalPlayerCharacter.Head.Position)) then
+                    local physicalDist = (localRoot.Position - partForChecks.Position).Magnitude
+                    if physicalDist <= SilentAimSettings.MaxDistance then
+                         if SilentAimSettings.PriorityMode == "Closest Player (No FOV)" then
+                            table.insert(candidates, {character = NPCModel, fov = math.huge, dist = physicalDist, health = Humanoid.Health})
+                        else
+                            local ScreenPosition, OnScreen = GetOnScreenPosition(partForChecks.Position)
+                            if OnScreen then
+                                local fovDist = (fovCenter - ScreenPosition).Magnitude
+                                if fovDist <= SilentAimSettings.FOVRadius then
+                                    table.insert(candidates, {character = NPCModel, fov = fovDist, dist = physicalDist, health = Humanoid.Health})
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if #candidates == 0 then return nil end
+    table.sort(candidates, function(a, b)
+        if SilentAimSettings.PriorityMode == "Lowest Health" then
+            return a.health < b.health
+        elseif SilentAimSettings.PriorityMode == "Closest Distance" or SilentAimSettings.PriorityMode == "Closest Player (No FOV)" then
+            return a.dist < b.dist
+        else
+            return a.fov < b.fov
+        end
+    end)
+    return candidates[1].character
+end
+
+function getPolygonPoints(center, radius, sides)
+    local points = {}
+    local rotationOffset = SilentAimSettings.IndicatorRotationEnabled and currentRotationAngle or 0
+    for i = 1, sides do
+        local angle = (i - 1) * (2 * math.pi / sides) - (math.pi / 2) + rotationOffset
+        table.insert(points, Vector2.new(center.X + radius * math.cos(angle), center.Y + radius * math.sin(angle)))
+    end
+    return points
+end
+
+function hideAllVisuals()
+    target_indicator_circle.Visible = false
+    for _, line in ipairs(target_indicator_lines) do 
+        line.Visible = false 
+    end
+    for _, text in pairs(overhead_info_texts) do 
+        text.Visible = false 
+    end
+    panel_info_bg.Visible = false
+    for _, text in pairs(panel_info_texts) do 
+        text.Visible = false 
+    end
+    if IndependentPanelFrame then 
+        IndependentPanelFrame.Visible = false 
+    end
+end
+
+local lastHealthValues = {}
+local damageIndicators = {}
+local DAMAGE_INDICATOR_FADE_TIME = 1
+
+local pos = SilentAimSettings.IndependentPanelPosition:split(",")
+IndependentPanelFrame.Position = UDim2.fromOffset(tonumber(pos[1]), tonumber(pos[2]))
+
+local lastTargetCharacter = nil
+local lockedRandomPart = nil
+
+-- PC Silent Aim functions (from prison-life.lua)
+local WallCheckParams = RaycastParams.new()
+WallCheckParams.FilterType = Enum.RaycastFilterType.Exclude
+WallCheckParams.IgnoreWater = true
+WallCheckParams.RespectCanCollide = false
+
+local function GetBodyPart(character, partName)
+    if not character then return nil end
+    local directPart = character:FindFirstChild(partName)
+    if directPart then return directPart end
+
+    local partMappings = {
+        ["Torso"] = {"Torso", "UpperTorso", "LowerTorso"},
+        ["LeftArm"] = {"Left Arm", "LeftUpperArm", "LeftLowerArm", "LeftHand"},
+        ["RightArm"] = {"Right Arm", "RightUpperArm", "RightLowerArm", "RightHand"},
+        ["LeftLeg"] = {"Left Leg", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot"},
+        ["RightLeg"] = {"Right Leg", "RightUpperLeg", "RightLowerLeg", "RightFoot"}
+    }
+
+    local mappings = partMappings[partName]
+    if mappings then
+        for _, name in ipairs(mappings) do
+            local part = character:FindFirstChild(name)
+            if part then return part end
+        end
+    end
+
+    return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Head")
+end
+
+local function GetTargetPart(character)
+    if not character then return nil end
+    local partName
+    if SilentAimSettings.RandomAimParts then
+        local partsList = {"Head","Torso","HumanoidRootPart","LeftArm","RightArm","LeftLeg","RightLeg"}
+        partName = partsList[math.random(1, #partsList)]
+    else
+        partName = SilentAimSettings.TargetPart
+        if partName == "Random" then partName = "Head" end
+    end
+    return GetBodyPart(character, partName)
+end
+
+local function GetMissPosition(targetPos)
+    local offset = Vector3.new(
+        math.random(-100, 100),
+        math.random(-100, 100),
+        math.random(-100, 100)
+    ).Unit * SilentAimSettings.MissSpread
+    return targetPos + offset
+end
+
+local function IsPlayerDead(plr)
+    if not plr or not plr.Character then return true end
+    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return true end
+    return false
+end
+
+local function HasForceField(plr)
+    if not plr or not plr.Character then return false end
+    return plr.Character:FindFirstChildOfClass("ForceField") ~= nil
+end
+
+local function IsWallBetween(startPos, endPos, targetCharacter)
+    local myChar = Player.Character
+    if not myChar then return true end
+    WallCheckParams.FilterDescendantsInstances = { myChar }
+    local direction = endPos - startPos
+    local distance = direction.Magnitude
+    local result = workspace:Raycast(startPos, direction.Unit * distance, WallCheckParams)
+
+    if not result then return false end
+    local hitPart = result.Instance
+    if targetCharacter and hitPart:IsDescendantOf(targetCharacter) then return false end
+
+    if hitPart.Transparency >= 0.8 or not hitPart.CanCollide then
+        local newStart = result.Position + direction.Unit * 0.1
+        local remainingDist = (endPos - newStart).Magnitude
+        if remainingDist > 0.5 then
+            local newResult = workspace:Raycast(newStart, direction.Unit * remainingDist, WallCheckParams)
+            if not newResult then return false end
+            if targetCharacter and newResult.Instance:IsDescendantOf(targetCharacter) then return false end
+        else
+            return false
+        end
+    end
+    return true
+end
+
+local function IsValidTarget(plr)
+    if not plr or plr == Player or not plr.Character then return false end
+    local targetPart = GetTargetPart(plr.Character)
+    if not targetPart then return false end
+    if SilentAimSettings.DeathCheck and IsPlayerDead(plr) then return false end
+    if SilentAimSettings.ForceFieldCheck and HasForceField(plr) then return false end
+    if SilentAimSettings.TeamCheck and plr.Team == Player.Team then return false end
+    
+    if SilentAimSettings.VisibleCheck then
+        local myChar = Player.Character
+        local myHead = myChar and myChar:FindFirstChild("Head")
+        if myHead then
+            if IsWallBetween(myHead.Position, targetPart.Position, plr.Character) then return false end
+        end
+    end
+    return true
+end
+
+local function RollHitChance()
+    if SilentAimSettings.HitChance >= 100 then return true end
+    if SilentAimSettings.HitChance <= 0 then return false end
+    return math.random(1, 100) <= SilentAimSettings.HitChance
+end
+
+local function GetClosestTarget(screenCenter)
+    local camera = workspace.CurrentCamera
+    if not camera then return nil end
+    
+    local closest = nil
+    local shortestDist = SilentAimSettings.FOVRadius
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if IsValidTarget(plr) then
+            local targetPart = GetTargetPart(plr.Character)
+            if targetPart then
+                local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
+                if onScreen then
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                    if dist < shortestDist then
+                        shortestDist = dist
+                        closest = plr
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function GetEquippedGun()
+    local char = Player.Character
+    if not char then return nil end
+    
+    for _, tool in pairs(char:GetChildren()) do
+        if tool:IsA("Tool") then
+            if tool:GetAttribute("ToolType") == "Gun" then
                 return tool
             end
         end
-        return nil
     end
-
-    local function UpdateAmmoGUI(ammo, maxAmmo)
-        pcall(function()
-            local playerGui = Player:FindFirstChild("PlayerGui")
-            if not playerGui then return end
-            local home = playerGui:FindFirstChild("Home")
-            if not home then return end
-            local hud = home:FindFirstChild("hud")
-            if not hud then return end
-            local gunFrame = hud:FindFirstChild("BottomRightFrame") and hud.BottomRightFrame:FindFirstChild("GunFrame")
-            if not gunFrame then return end
-            local label = gunFrame:FindFirstChild("BulletsLabel")
-            if label then
-                label.Text = tostring(ammo) .. "/" .. tostring(maxAmmo)
-            end
-        end)
-    end
-
-    local IsReloading = false
-    local FuncReload = ReplicatedStorage:FindFirstChild("GunRemotes") and ReplicatedStorage.GunRemotes:FindFirstChild("FuncReload")
-
-    local function ReloadGun()
-        if IsReloading then return false end
-        if not FuncReload then return false end
-
-        local gun = GetEquippedGun()
-        if not gun then return false end
-
-        local currentAmmo = gun:GetAttribute("Local_CurrentAmmo") or 0
-        local maxAmmo = gun:GetAttribute("MaxAmmo") or 0
-
-        if currentAmmo >= maxAmmo then return false end
-
-        IsReloading = true
-        local success = pcall(function()
-            FuncReload:InvokeServer()
-        end)
-
-        if success then
-            gun:SetAttribute("Local_CurrentAmmo", maxAmmo)
-            UpdateAmmoGUI(maxAmmo, maxAmmo)
-        end
-
-        IsReloading = false
-        return success
-    end
-
-    local function PlayGunSound(gun)
-        if not gun then return end
-        local handle = gun:FindFirstChild("Handle", true)
-        if not handle then return end
-
-        local shootSound = handle:FindFirstChild("ShootSound")
-        if shootSound then
-            local sClone = shootSound:Clone()
-            sClone.Parent = handle
-            sClone:Play()
-            Debris:AddItem(sClone, 2)
-        end
-
-        local isShotgun = gun:GetAttribute("IsShotgun")
-        local secondary = handle:FindFirstChild("SecondarySound")
-
-        if isShotgun and secondary then
-            task.delay(0.2, function()
-                if handle then
-                    local sClone = secondary:Clone()
-                    sClone.Parent = handle
-                    sClone:Play()
-                    Debris:AddItem(sClone, 2)
-                end
-            end)
-        end
-    end
-
-    local function CreateTaserTracer(startPos, endPos, gun)
-        local distance = (endPos - startPos).Magnitude
-
-        local bullet = Instance.new("Part")
-        bullet.Name = "RayPart"
-        bullet.Anchored = true
-        bullet.CanCollide = false
-        bullet.CastShadow = false
-        bullet.Material = Enum.Material.Neon
-        bullet.BrickColor = BrickColor.new("Cyan")
-        bullet.Transparency = 0.5
-        bullet.Size = Vector3.new(0.2, 0.2, distance)
-        bullet.CFrame = CFrame.new(endPos, startPos) * CFrame.new(0, 0, -distance / 2)
-        bullet.CollisionGroup = "Nothing"
-
-        local mesh = Instance.new("BlockMesh", bullet)
-        mesh.Scale = Vector3.new(0.8, 0.8, 1)
-
-        local light = Instance.new("SurfaceLight", bullet)
-        light.Color = Color3.fromRGB(0, 234, 255)
-        light.Range = 7
-        light.Face = Enum.NormalId.Bottom
-        light.Brightness = 5
-        light.Angle = 180
-
-        bullet.Parent = workspace
-
-        local tweenInfo = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-        local bulletTween = TweenService:Create(bullet, tweenInfo, { Transparency = 1 })
-        local lightTween = TweenService:Create(light, tweenInfo, { Brightness = 0 })
-
-        bulletTween:Play()
-        lightTween:Play()
-
-        Debris:AddItem(bullet, 2)
-
-        if gun then
-            local handle = gun:FindFirstChild("Handle", true)
-            if handle then
-                local flare = handle:FindFirstChild("Flare")
-                if flare then
-                    flare.Enabled = true
-                    task.delay(0.05, function() if flare then flare.Enabled = false end end)
-                end
-            end
-        end
-    end
-
-    local function CreateBulletTracer(startPos, endPos, gun)
-        local distance = (endPos - startPos).Magnitude
-
-        local bullet = Instance.new("Part")
-        bullet.Name = "RayPart"
-        bullet.Anchored = true
-        bullet.CanCollide = false
-        bullet.CastShadow = false
-        bullet.Material = Enum.Material.Neon
-        bullet.BrickColor = BrickColor.Yellow()
-        bullet.Transparency = 0.5
-        bullet.Size = Vector3.new(0.2, 0.2, distance)
-        bullet.CFrame = CFrame.new(endPos, startPos) * CFrame.new(0, 0, -distance / 2)
-
-        local mesh = Instance.new("BlockMesh", bullet)
-        mesh.Scale = Vector3.new(0.5, 0.5, 1)
-
-        bullet.Parent = workspace
-        Debris:AddItem(bullet, 0.05)
-
-        if gun then
-            local handle = gun:FindFirstChild("Handle", true)
-            if handle then
-                local flare = handle:FindFirstChild("Flare")
-                if flare then
-                    flare.Enabled = true
-                    task.delay(0.05, function() if flare then flare.Enabled = false end end)
-                end
-            end
-        end
-    end
-
-    local function CreateProjectileTracer(startPos, endPos, gun)
-        if not gun then return end
-        local projectileType = gun:GetAttribute("Projectile")
-        if projectileType == "Taser" then
-            CreateTaserTracer(startPos, endPos, gun)
-        else
-            CreateBulletTracer(startPos, endPos, gun)
-        end
-    end
-
-    local ShootEvent = ReplicatedStorage:FindFirstChild("GunRemotes") and ReplicatedStorage.GunRemotes:FindFirstChild("ShootEvent")
-
-    local function FireSilentAim()
-        local gun = GetEquippedGun()
-        if not gun then return false end
-
-        local ammo = gun:GetAttribute("Local_CurrentAmmo") or 0
-        if ammo <= 0 then
-            if SilentAimSettings.AutoReload then
-                ReloadGun()
-            end
-            return false
-        end
-
-        local fireRate = gun:GetAttribute("FireRate") or 0.12
-        local now = tick()
-        if now - LastShot < fireRate then return false end
-
-        local char = Player.Character
-        local myHead = char and char:FindFirstChild("Head")
-        if not myHead then return false end
-
-        local hitPos, hitPart
-
-        if SilentAimSettings.Enabled and CurrentSilentAimTarget and CurrentSilentAimTarget.Character and IsValidTarget(CurrentSilentAimTarget) then
-            local targetPart = GetTargetPart(CurrentSilentAimTarget.Character)
-            if targetPart then
-                if RollHitChance() then
-                    hitPos = targetPart.Position
-                    hitPart = targetPart
-                else
-                    hitPos = GetMissPosition(targetPart.Position)
-                    hitPart = workspace
-                end
-            end
-        end
-
-        if not hitPos then
-            local camera = workspace.CurrentCamera
-            local screenCenter = camera.ViewportSize / 2
-            if IS_DESKTOP then
-                local mouse = UserInputService:GetMouseLocation()
-                screenCenter = Vector2.new(mouse.X, mouse.Y)
-            elseif SilentAimSettings.DynamicFOV and IS_MOBILE then
-                local touches = UserInputService:GetTouches()
-                if #touches > 0 then
-                    screenCenter = Vector2.new(touches[1].Position.X, touches[1].Position.Y)
-                end
-            end
-            local ray = camera:ViewportPointToRay(screenCenter.X, screenCenter.Y)
-
-            local rayParams = RaycastParams.new()
-            rayParams.FilterType = Enum.RaycastFilterType.Exclude
-            rayParams.FilterDescendantsInstances = {char}
-
-            local result = workspace:Raycast(ray.Origin, ray.Direction * 1000, rayParams)
-            if result then
-                hitPos = result.Position
-                hitPart = result.Instance
-            else
-                hitPos = ray.Origin + (ray.Direction * 1000)
-                hitPart = workspace
-            end
-        end
-
-        gun:SetAttribute("Local_IsShooting", true)
-
-        local muzzle = gun:FindFirstChild("Muzzle", true)
-        local visualStart = muzzle and muzzle.Position or myHead.Position
-        local origin = visualStart
-
-        local projectileCount = gun:GetAttribute("ProjectileCount") or 1
-        local bullets = {}
-        for i = 1, projectileCount do
-            table.insert(bullets, { origin, hitPos, hitPart })
-        end
-
-        LastShot = now
-
-        PlayGunSound(gun)
-
-        for i = 1, projectileCount do
-            local offset = Vector3.new(
-                math.random(-10, 10) / 100,
-                math.random(-10, 10) / 100,
-                math.random(-10, 10) / 100
-            )
-            CreateProjectileTracer(visualStart, hitPos + offset, gun)
-        end
-
-        if ShootEvent then
-            ShootEvent:FireServer(bullets)
-        end
-
-        local newAmmo = ammo - 1
-        gun:SetAttribute("Local_CurrentAmmo", newAmmo)
-
-        local maxAmmo = gun:GetAttribute("MaxAmmo") or 0
-        UpdateAmmoGUI(newAmmo, maxAmmo)
-
-        if newAmmo <= 0 and SilentAimSettings.AutoReload then
-            task.wait(0.5)
-            ReloadGun()
-        end
-
-        return true
-    end
-
-    local function SetupPCControls()
-        local function HandleAction(actionName, inputState, inputObject)
-            if actionName == "SilentAimShoot" then
-                if not SilentAimSettings.Enabled then return Enum.ContextActionResult.Pass end
-                if inputState == Enum.UserInputState.Begin then
-                    local gun = GetEquippedGun()
-                    if not gun then return Enum.ContextActionResult.Pass end
-
-                    if not gun:GetAttribute("AutoFire") then
-                        IsSilentAimShooting = true
-                        FireSilentAim()
-                        IsSilentAimShooting = false
-                    else
-                        IsSilentAimShooting = true
-                    end
-                    return Enum.ContextActionResult.Sink
-                elseif inputState == Enum.UserInputState.End then
-                    IsSilentAimShooting = false
-                    return Enum.ContextActionResult.Sink
-                end
-            end
-            return Enum.ContextActionResult.Pass
-        end
-        ContextActionService:BindActionAtPriority("SilentAimShoot", HandleAction, false, 3000, Enum.UserInputType.MouseButton1)
-    end
-
-    local function SetupToggleKey()
-        UserInputService.InputBegan:Connect(function(input, gpe)
-            if gpe then return end
-            if input.KeyCode == Enum.KeyCode[SilentAimSettings.ToggleKey] then
-                SilentAimSettings.Enabled = not SilentAimSettings.Enabled
-            elseif input.KeyCode == Enum.KeyCode.R then
-                ReloadGun()
-            end
-        end)
-    end
-
-    if Drawing and Drawing.new then
-        pcall(function()
-            SilentAimFOV = Drawing.new("Circle")
-            SilentAimFOV.Color = Color3.fromRGB(0, 0, 255)
-            SilentAimFOV.Thickness = 2
-            SilentAimFOV.Filled = false
-            SilentAimFOV.Radius = SilentAimSettings.FOVRadius
-            SilentAimFOV.Visible = false
-            SilentAimFOV.NumSides = 64
-
-            TargetLine = Drawing.new("Line")
-            TargetLine.Color = Color3.fromRGB(0, 255, 0)
-            TargetLine.Thickness = 2
-            TargetLine.Visible = false
-        end)
-    end
-
-    local silentAimRenderConnection = RunService.RenderStepped:Connect(function()
-        local camera = workspace.CurrentCamera
-        if not camera then return end
-
-        local screenCenter = camera.ViewportSize / 2
-        if IS_DESKTOP then
-            local mouse = UserInputService:GetMouseLocation()
-            screenCenter = Vector2.new(mouse.X, mouse.Y)
-        elseif SilentAimSettings.DynamicFOV and IS_MOBILE then
-            local touches = UserInputService:GetTouches()
-            if #touches > 0 then
-                screenCenter = Vector2.new(touches[1].Position.X, touches[1].Position.Y)
-            end
-        end
-
-        if SilentAimFOV then
-            SilentAimFOV.Position = screenCenter
-            SilentAimFOV.Radius = SilentAimSettings.FOVRadius
-            SilentAimFOV.Visible = SilentAimSettings.FOVVisible and SilentAimSettings.Enabled
-        end
-
-        if SilentAimSettings.Enabled then
-            CurrentSilentAimTarget = GetClosestTarget(screenCenter)
-        else
-            CurrentSilentAimTarget = nil
-        end
-
-        if TargetLine then
-            if SilentAimSettings.ShowSilentAimTarget and CurrentSilentAimTarget and CurrentSilentAimTarget.Character then
-                local targetPart = GetTargetPart(CurrentSilentAimTarget.Character)
-                if targetPart then
-                    local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
-                    if onScreen then
-                        TargetLine.From = screenCenter
-                        TargetLine.To = Vector2.new(screenPos.X, screenPos.Y)
-                        TargetLine.Visible = SilentAimSettings.Enabled
-                    else
-                        TargetLine.Visible = false
-                    end
-                else
-                    TargetLine.Visible = false
-                end
-            else
-                TargetLine.Visible = false
-            end
-        end
-    end)
-
-    RunService.Heartbeat:Connect(function()
-        if not IsSilentAimShooting then return end
-        local gun = GetEquippedGun()
-        if not gun then return end
-        if gun:GetAttribute("AutoFire") then
-            FireSilentAim()
-        end
-    end)
-
-    SetupPCControls()
-    SetupToggleKey()
+    return nil
 end
 
+local function UpdateAmmoGUI(ammo, maxAmmo)
+    pcall(function()
+        local playerGui = Player:FindFirstChild("PlayerGui")
+        if not playerGui then return end
+        
+        local home = playerGui:FindFirstChild("Home")
+        if not home then return end
+        
+        local hud = home:FindFirstChild("hud")
+        if not hud then return end
+        
+        local gunFrame = hud:FindFirstChild("BottomRightFrame") and hud.BottomRightFrame:FindFirstChild("GunFrame")
+        if not gunFrame then return end
+        
+        local label = gunFrame:FindFirstChild("BulletsLabel")
+        if label then
+            label.Text = tostring(ammo) .. "/" .. tostring(maxAmmo)
+        end
+    end)
+end
+
+local function ReloadGun()
+    if IsReloading then return false end
+    if not FuncReload then return false end
+    
+    local gun = GetEquippedGun()
+    if not gun then return false end
+    
+    local currentAmmo = gun:GetAttribute("Local_CurrentAmmo") or 0
+    local maxAmmo = gun:GetAttribute("MaxAmmo") or 0
+    
+    if currentAmmo >= maxAmmo then return false end
+    
+    IsReloading = true
+    
+    local success = pcall(function()
+        FuncReload:InvokeServer()
+    end)
+    
+    if success then
+        gun:SetAttribute("Local_CurrentAmmo", maxAmmo)
+        UpdateAmmoGUI(maxAmmo, maxAmmo)
+    end
+    
+    IsReloading = false
+    return success
+end
+
+local function PlayGunSound(gun)
+    if not gun then return end
+    local handle = gun:FindFirstChild("Handle", true)
+    if not handle then return end
+
+    local shootSound = handle:FindFirstChild("ShootSound")
+    if shootSound then
+        local sClone = shootSound:Clone()
+        sClone.Parent = handle
+        sClone:Play()
+        Debris:AddItem(sClone, 2)
+    end
+
+    local isShotgun = gun:GetAttribute("IsShotgun")
+    local secondary = handle:FindFirstChild("SecondarySound")
+    
+    if isShotgun and secondary then
+        task.delay(0.2, function()
+            if handle then
+                local sClone = secondary:Clone()
+                sClone.Parent = handle
+                sClone:Play()
+                Debris:AddItem(sClone, 2)
+            end
+        end)
+    end
+end
+
+local function CreateTaserTracer(startPos, endPos, gun)
+    local distance = (endPos - startPos).Magnitude
+    
+    local bullet = Instance.new("Part")
+    bullet.Name = "RayPart"
+    bullet.Anchored = true
+    bullet.CanCollide = false
+    bullet.CastShadow = false
+    bullet.Material = Enum.Material.Neon
+    bullet.BrickColor = BrickColor.new("Cyan")
+    bullet.Transparency = 0.5
+    bullet.Size = Vector3.new(0.2, 0.2, distance)
+    bullet.CFrame = CFrame.new(endPos, startPos) * CFrame.new(0, 0, -distance / 2)
+    bullet.CollisionGroup = "Nothing"
+    
+    local mesh = Instance.new("BlockMesh", bullet)
+    mesh.Scale = Vector3.new(0.8, 0.8, 1)
+    
+    local light = Instance.new("SurfaceLight", bullet)
+    light.Color = Color3.fromRGB(0, 234, 255)
+    light.Range = 7
+    light.Face = Enum.NormalId.Bottom
+    light.Brightness = 5
+    light.Angle = 180
+    
+    bullet.Parent = workspace
+    
+    local tweenInfo = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    local bulletTween = TweenService:Create(bullet, tweenInfo, { Transparency = 1 })
+    local lightTween = TweenService:Create(light, tweenInfo, { Brightness = 0 })
+    
+    bulletTween:Play()
+    lightTween:Play()
+    
+    Debris:AddItem(bullet, 2)
+    
+    if gun then
+        local handle = gun:FindFirstChild("Handle", true)
+        if handle then
+            local flare = handle:FindFirstChild("Flare")
+            if flare then
+                flare.Enabled = true
+                task.delay(0.05, function() if flare then flare.Enabled = false end end)
+            end
+        end
+    end
+end
+
+local function CreateBulletTracer(startPos, endPos, gun)
+    local distance = (endPos - startPos).Magnitude
+    
+    local bullet = Instance.new("Part")
+    bullet.Name = "RayPart"
+    bullet.Anchored = true
+    bullet.CanCollide = false
+    bullet.CastShadow = false
+    bullet.Material = Enum.Material.Neon
+    bullet.BrickColor = BrickColor.Yellow()
+    bullet.Transparency = 0.5
+    bullet.Size = Vector3.new(0.2, 0.2, distance)
+    bullet.CFrame = CFrame.new(endPos, startPos) * CFrame.new(0, 0, -distance / 2)
+    
+    local mesh = Instance.new("BlockMesh", bullet)
+    mesh.Scale = Vector3.new(0.5, 0.5, 1) 
+    
+    bullet.Parent = workspace
+    Debris:AddItem(bullet, 0.05)
+    
+    if gun then
+        local handle = gun:FindFirstChild("Handle", true)
+        if handle then
+            local flare = handle:FindFirstChild("Flare")
+            if flare then
+                flare.Enabled = true
+                task.delay(0.05, function() if flare then flare.Enabled = false end end)
+            end
+        end
+    end
+end
+
+local function CreateProjectileTracer(startPos, endPos, gun)
+    if not gun then return end
+    local projectileType = gun:GetAttribute("Projectile")
+    if projectileType == "Taser" then
+        CreateTaserTracer(startPos, endPos, gun)
+    else
+        CreateBulletTracer(startPos, endPos, gun)
+    end
+end
+
+local IsSilentAimShooting = false
+local LastShot = 0
+
+local function FireSilentAim()
+    local gun = GetEquippedGun()
+    if not gun then 
+        return false 
+    end
+    
+    local ammo = gun:GetAttribute("Local_CurrentAmmo") or 0
+    if ammo <= 0 then 
+        if SilentAimSettings.AutoReload then
+            ReloadGun()
+        end
+        return false 
+    end
+
+    local fireRate = gun:GetAttribute("FireRate") or 0.12
+    local now = tick()
+    if now - LastShot < fireRate then return false end
+
+    local char = Player.Character
+    local myHead = char and char:FindFirstChild("Head")
+    if not myHead then return false end
+
+    local hitPos, hitPart
+
+    if SilentAimSettings.Enabled and CurrentSilentAimTarget and CurrentSilentAimTarget.Character and IsValidTarget(CurrentSilentAimTarget) then
+         local targetPart = GetTargetPart(CurrentSilentAimTarget.Character)
+         if targetPart then
+             if RollHitChance() then
+                 hitPos = targetPart.Position
+                 hitPart = targetPart
+             else
+                 hitPos = GetMissPosition(targetPart.Position)
+                 hitPart = workspace
+             end
+         end
+    end
+
+    if not hitPos then
+         local camera = workspace.CurrentCamera
+         local screenCenter = camera.ViewportSize / 2
+         if IS_DESKTOP then
+             local mouse = UserInputService:GetMouseLocation()
+             screenCenter = Vector2.new(mouse.X, mouse.Y)
+         elseif SilentAimSettings.DynamicFOV and IS_MOBILE then
+             local touches = UserInputService:GetTouches()
+             if #touches > 0 then
+                 screenCenter = Vector2.new(touches[1].Position.X, touches[1].Position.Y)
+             end
+         end
+         local ray = camera:ViewportPointToRay(screenCenter.X, screenCenter.Y)
+         
+         local rayParams = RaycastParams.new()
+         rayParams.FilterType = Enum.RaycastFilterType.Exclude
+         rayParams.FilterDescendantsInstances = {char}
+         
+         local result = workspace:Raycast(ray.Origin, ray.Direction * 1000, rayParams)
+         if result then
+             hitPos = result.Position
+             hitPart = result.Instance
+         else
+             hitPos = ray.Origin + (ray.Direction * 1000)
+             hitPart = workspace
+         end
+    end
+
+    gun:SetAttribute("Local_IsShooting", true)
+
+    local muzzle = gun:FindFirstChild("Muzzle", true)
+    local visualStart = muzzle and muzzle.Position or myHead.Position
+    local origin = visualStart
+    
+    local projectileCount = gun:GetAttribute("ProjectileCount") or 1
+    local bullets = {}
+    for i = 1, projectileCount do
+        table.insert(bullets, { origin, hitPos, hitPart })
+    end
+
+    LastShot = now
+
+    PlayGunSound(gun)
+
+    for i = 1, projectileCount do
+        local offset = Vector3.new(
+            math.random(-10, 10) / 100,
+            math.random(-10, 10) / 100,
+            math.random(-10, 10) / 100
+        )
+        CreateProjectileTracer(visualStart, hitPos + offset, gun)
+    end
+
+    if ShootEvent then
+        ShootEvent:FireServer(bullets)
+    end
+
+    local newAmmo = ammo - 1
+    gun:SetAttribute("Local_CurrentAmmo", newAmmo)
+    
+    local maxAmmo = gun:GetAttribute("MaxAmmo") or 0
+    UpdateAmmoGUI(newAmmo, maxAmmo)
+
+    if newAmmo <= 0 and SilentAimSettings.AutoReload then
+        task.wait(0.5)
+        ReloadGun()
+    end
+
+    return true
+end
+
+-- PC Silent Aim Control Setup
+local function SetupPCControls()
+    if not IS_DESKTOP then return end
+    
+    local function HandleAction(actionName, inputState, inputObject)
+        if actionName == "SilentAimShoot" then
+            if not SilentAimSettings.Enabled then return Enum.ContextActionResult.Pass end
+            if inputState == Enum.UserInputState.Begin then
+                local gun = GetEquippedGun()
+                if not gun then 
+                    return Enum.ContextActionResult.Pass 
+                end
+                
+                if not gun:GetAttribute("AutoFire") then
+                    IsSilentAimShooting = true
+                    FireSilentAim()
+                    IsSilentAimShooting = false
+                else
+                    IsSilentAimShooting = true
+                end
+                
+                return Enum.ContextActionResult.Sink
+            elseif inputState == Enum.UserInputState.End then
+                IsSilentAimShooting = false
+                return Enum.ContextActionResult.Sink
+            end
+        end
+        return Enum.ContextActionResult.Pass
+    end
+    
+    ContextActionService:BindActionAtPriority("SilentAimShoot", HandleAction, false, 3000, Enum.UserInputType.MouseButton1)
+end
+
+local function SetupToggleKey()
+    if not IS_DESKTOP then return end
+    
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == Enum.KeyCode[SilentAimSettings.ToggleKey] then
+            SilentAimSettings.Enabled = not SilentAimSettings.Enabled
+        elseif input.KeyCode == Enum.KeyCode.R then
+            ReloadGun()
+        end
+    end)
+end
+
+-- Mobile hooks (keep original for mobile)
 if IS_MOBILE then
-    local GetPlayers = Players.GetPlayers
-    local WorldToViewportPoint = Camera.WorldToViewportPoint
-    local FindFirstChild = game.FindFirstChild
-    local RenderStepped = RunService.RenderStepped
-    local GetMouseLocation = UserInputService.GetMouseLocation
-
-    local resume = coroutine.resume
-    local create = coroutine.create
-
-    local ValidTargetParts = {"Head", "HumanoidRootPart"}
-    local PredictionAmount = 0.165
-
-    local currentTargetPart = nil
-    local currentHighlight = nil
-    local currentRotationAngle = 0
-    local currentIndicatorHue = 0
-    local npcList = {}
-    local targetMap = {}
-    local avatarCache = {}
-    local recentShots = {}
-    local pendingDamage = {}
-
-    local lockedTargetObject = nil
-
-    local target_indicator_circle = Drawing.new("Circle")
-    target_indicator_circle.Visible = false; target_indicator_circle.ZIndex = 1000; target_indicator_circle.Thickness = 2; target_indicator_circle.Filled = false
-
-    local target_indicator_lines = {}
-    for i = 1, 5 do 
-        local line = Drawing.new("Line")
-        line.Visible = false
-        line.ZIndex = 1000
-        line.Thickness = 2
-        table.insert(target_indicator_lines, line) 
-    end
-
-    local overhead_info_texts = {
-        Name = Drawing.new("Text"),
-        Health = Drawing.new("Text"),
-        Distance = Drawing.new("Text"),
-        Category = Drawing.new("Text")
-    }
-
-    for _, text in pairs(overhead_info_texts) do
-        text.Visible = false
-        text.ZIndex = 1001
-        text.Font = Drawing.Fonts.Plex
-        text.Size = 14
-        text.Color = Color3.fromRGB(255, 255, 255)
-        text.Center = true
-        text.Outline = true
-    end
-
-    local panel_info_bg = Drawing.new("Square")
-    panel_info_bg.Visible = false
-    panel_info_bg.ZIndex = 1002
-    panel_info_bg.Color = Color3.fromRGB(0, 0, 0)
-    panel_info_bg.Thickness = 0
-    panel_info_bg.Filled = true
-    panel_info_bg.Transparency = 0.5
-
-    local panel_info_texts = {
-        Name = Drawing.new("Text"),
-        Health = Drawing.new("Text"),
-        Distance = Drawing.new("Text"),
-        Category = Drawing.new("Text")
-    }
-
-    for _, text in pairs(panel_info_texts) do
-        text.Visible = false
-        text.ZIndex = 1003
-        text.Font = Drawing.Fonts.Plex
-        text.Size = 14
-        text.Color = Color3.fromRGB(255, 255, 255)
-        text.Center = false
-        text.Outline = true
-    end
-
-    local FOVCircleGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
-    FOVCircleGui.Name = "FOVCircleGui"
-    FOVCircleGui.ResetOnSpawn = false
-    FOVCircleGui.IgnoreGuiInset = true
-    FOVCircleGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-    local FOVCircleFrame = Instance.new("Frame", FOVCircleGui)
-    FOVCircleFrame.Name = "FOVCircleFrame"
-    FOVCircleFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    FOVCircleFrame.Position = UDim2.fromScale(0.5, 0.5)
-    FOVCircleFrame.BackgroundTransparency = 1
-
-    local FOVStroke = Instance.new("UIStroke", FOVCircleFrame)
-    FOVStroke.Name = "FOVStroke"
-    FOVStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    FOVStroke.Thickness = 1
-    FOVStroke.Transparency = 0.5
-
-    local FOVCorner = Instance.new("UICorner", FOVCircleFrame)
-    FOVCorner.Name = "FOVCorner"
-    FOVCorner.CornerRadius = UDim.new(1, 0)
-
-    local IndependentPanelGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
-    IndependentPanelGui.Name = "IndependentPanelGui"
-    IndependentPanelGui.ResetOnSpawn = false
-    IndependentPanelGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-    local IndependentPanelFrame = Instance.new("Frame", IndependentPanelGui)
-    IndependentPanelFrame.Name = "PanelFrame"
-    IndependentPanelFrame.Size = UDim2.fromOffset(160, 100)
-    IndependentPanelFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    IndependentPanelFrame.BackgroundTransparency = 0.3
-    IndependentPanelFrame.BorderSizePixel = 1
-    IndependentPanelFrame.BorderColor3 = Color3.new(1,1,1)
-    IndependentPanelFrame.Visible = false
-    IndependentPanelFrame.Active = true
-
-    local IPCorner = Instance.new("UICorner", IndependentPanelFrame)
-    IPCorner.CornerRadius = UDim.new(0, 4)
-
-    local IPListLayout = Instance.new("UIListLayout", IndependentPanelFrame)
-    IPListLayout.Padding = UDim.new(0, 5)
-    IPListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    IPListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    IPListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-
-    local independent_panel_texts = {}
-    for i, name in ipairs({"Name", "Health", "Distance", "Category"}) do
-        local label = Instance.new("TextLabel", IndependentPanelFrame)
-        label.Name = name
-        label.Size = UDim2.new(1, -10, 0, 15)
-        label.BackgroundTransparency = 1
-        label.Font = Enum.Font.SourceSans
-        label.TextSize = 14
-        label.TextColor3 = Color3.new(1,1,1)
-        label.TextXAlignment = Enum.TextXAlignment.Left
-        label.LayoutOrder = i
-        independent_panel_texts[name] = label
-    end
-
-    IndependentPanelFrame.InputBegan:Connect(function(input) 
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and IndependentPanelFrame.Draggable then 
-            IndependentPanelFrame.Position = UDim2.fromOffset(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y) 
-        end 
-    end)
-
-    IndependentPanelFrame.InputEnded:Connect(function(input) 
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and IndependentPanelFrame.Draggable then 
-            SilentAimSettings.IndependentPanelPosition = IndependentPanelFrame.Position.X.Offset .. "," .. IndependentPanelFrame.Position.Y.Offset 
-        end 
-    end)
-
-    local ExpectedArguments = {
-        FindPartOnRayWithIgnoreList = { ArgCountRequired = 3, Args = {"Instance", "Ray", "table", "boolean", "boolean"} },
-        FindPartOnRayWithWhitelist = { ArgCountRequired = 3, Args = {"Instance", "Ray", "table", "boolean"} },
-        FindPartOnRay = { ArgCountRequired = 2, Args = {"Instance", "Ray", "Instance", "boolean", "boolean"} },
-        Raycast = { ArgCountRequired = 3, Args = {"Instance", "Vector3", "Vector3", "RaycastParams"} }
-    }
-
-    local HitSounds = {
-        ["bell"] = "rbxassetid://8679627751",
-        ["metal"] = "rbxassetid://3125624765",
-        ["click"] = "rbxassetid://17755696142",
-        ["exp"] = "rbxassetid://10070796384"
-    }
-
-    local rainbowColor = Color3.fromHSV(0, 1, 1)
-    task.spawn(function()
-        while task.wait() do
-            local hue = (tick() % 6) / 6
-            rainbowColor = Color3.fromHSV(hue, 1, 1)
-        end
-    end)
-
-    local function playHitSound(soundId)
-        local sound = Instance.new("Sound")
-        sound.Parent = CoreGui
-        sound.SoundId = soundId
-        sound.Volume = 0.6
-        sound:Play()
-        Debris:AddItem(sound, sound.TimeLength + 0.2)
-    end
-
-    function CalculateChance(Percentage)
-        Percentage = math.floor(Percentage)
-        return math.random() <= Percentage / 100
-    end
-
-    local function getPositionOnScreen(Vector)
-        local Vec3, OnScreen = WorldToViewportPoint(Camera, Vector)
-        return Vector2.new(Vec3.X, Vec3.Y), OnScreen
-    end
-
-    local function ValidateArguments(Args, RayMethod)
-        local Matches = 0
-        if #Args < RayMethod.ArgCountRequired then return false end
-        for Pos, Argument in next, Args do 
-            if typeof(Argument) == RayMethod.Args[Pos] then 
-                Matches = Matches + 1 
-            end 
-        end
-        return Matches >= RayMethod.ArgCountRequired
-    end
-
-    local function getDirection(Origin, Position)
-        return (Position - Origin).Unit * 1000
-    end
-
-    local function isNPC(obj)
-        return obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 and obj:FindFirstChild("HumanoidRootPart") and not Players:GetPlayerFromCharacter(obj)
-    end
-
-    function getTargetCategory(character)
-        if not character then return "None" end
-
-        if Players:GetPlayerFromCharacter(character) then
-            return "Player"
-        end
-
-        if SilentAimSettings.EnableNameTargeting then
-            local name = character.Name:lower()
-            for _, whitelistedName in ipairs(SilentAimSettings.WhitelistedNames) do
-                if whitelistedName and whitelistedName ~= "" and string.find(name, whitelistedName:lower(), 1, true) then
-                    return "Whitelisted"
-                end
-            end
-        end
-        
-        if character:FindFirstChild("Humanoid") then
-             return "NPC"
-        end
-
-        return "Unknown"
-    end
-
-    local function updateNPCs()
-        local newNpcList = {}
-        local addedNpcs = {} 
-
-        if SilentAimSettings.EnableNameTargeting and #SilentAimSettings.WhitelistedNames > 0 then
-            for _, model in ipairs(workspace:GetDescendants()) do
-                if isNPC(model) then
-                    for _, substring in ipairs(SilentAimSettings.WhitelistedNames) do
-                        if substring and substring ~= "" and string.find(model.Name:lower(), substring:lower(), 1, true) then
-                            if not addedNpcs[model] then
-                                table.insert(newNpcList, model)
-                                addedNpcs[model] = true
-                                break 
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        for _, v in ipairs(workspace:GetChildren()) do
-            if isNPC(v) then
-                if not addedNpcs[v] then
-                    table.insert(newNpcList, v)
-                    addedNpcs[v] = true
-                end
-            end
-        end
-        
-        npcList = newNpcList
-    end
-
-    local function isBlacklisted(name)
-        local lowerName = name:lower()
-        for _, blacklistedName in ipairs(SilentAimSettings.BlacklistedNames) do
-            if blacklistedName:lower() == lowerName then
-                return true
-            end
-        end
-        return false
-    end
-
-    local function isPartVisible(part, customOrigin)
-        if not part then return false end
-        local localCharacter = Player.Character
-        if not localCharacter then return false end
-        local origin = customOrigin or Camera.CFrame.Position
-        local direction = part.Position - origin
-        local raycastParams = RaycastParams.new()
-        raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-        raycastParams.FilterDescendantsInstances = {localCharacter, part.Parent}
-        local raycastResult = workspace:Raycast(origin, direction.Unit * direction.Magnitude, raycastParams)
-        return not raycastResult
-    end
-
-    local function GetOnScreenPosition(v3)
-        local pos, vis = WorldToViewportPoint(Camera, v3)
-        return Vector2.new(pos.X, pos.Y), vis
-    end
-
-    local function GetFovCenter()
-        return SilentAimSettings.FixedFOV and (Camera.ViewportSize / 2) or GetMouseLocation(UserInputService)
-    end
-
-    local function getClosestPlayer()
-        local LocalPlayerCharacter = Player.Character
-        if not LocalPlayerCharacter or not LocalPlayerCharacter:FindFirstChild("HumanoidRootPart") then return nil end
-        local localRoot = LocalPlayerCharacter.HumanoidRootPart
-        
-        local fovCenter = GetFovCenter()
-        local candidates = {}
-        
-        for _, PlayerObj in ipairs(GetPlayers(Players)) do
-            if PlayerObj ~= Player and not (SilentAimSettings.TeamCheck and PlayerObj.Team == Player.Team) and not isBlacklisted(PlayerObj.Name) then
-                local Character = PlayerObj.Character
-                local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
-                if Character and Humanoid and Humanoid.Health > 0 then
-                    local partForChecks = Character:FindFirstChild(SilentAimSettings.TargetPart) or Character:FindFirstChild("HumanoidRootPart")
-                    if not partForChecks then continue end
-
-                    if not (SilentAimSettings.VisibleCheck and not isPartVisible(partForChecks, LocalPlayerCharacter.Head.Position)) then
-                        local physicalDist = (localRoot.Position - partForChecks.Position).Magnitude
-                        if physicalDist <= SilentAimSettings.MaxDistance then
-                            if SilentAimSettings.PriorityMode == "Closest Player (No FOV)" then
-                                table.insert(candidates, {character = Character, fov = math.huge, dist = physicalDist, health = Humanoid.Health})
-                            else
-                                local ScreenPosition, OnScreen = GetOnScreenPosition(partForChecks.Position)
-                                if OnScreen then
-                                    local fovDist = (fovCenter - ScreenPosition).Magnitude
-                                    if fovDist <= SilentAimSettings.FOVRadius then
-                                        table.insert(candidates, {character = Character, fov = fovDist, dist = physicalDist, health = Humanoid.Health})
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        if #candidates == 0 then return nil end
-        table.sort(candidates, function(a, b)
-            if SilentAimSettings.PriorityMode == "Lowest Health" then
-                return a.health < b.health
-            elseif SilentAimSettings.PriorityMode == "Closest Distance" or SilentAimSettings.PriorityMode == "Closest Player (No FOV)" then
-                return a.dist < b.dist
-            else
-                return a.fov < b.fov
-            end
-        end)
-        return candidates[1].character
-    end
-
-    local function getNPCTarget()
-        local LocalPlayerCharacter = Player.Character
-        if not LocalPlayerCharacter or not LocalPlayerCharacter:FindFirstChild("HumanoidRootPart") then return nil end
-        local localRoot = LocalPlayerCharacter.HumanoidRootPart
-
-        local fovCenter = GetFovCenter()
-        local candidates = {}
-
-        for _, NPCModel in ipairs(npcList) do
-            if not (SilentAimSettings.TeamCheck and NPCModel.Team and NPCModel.Team == Player.Team) and not isBlacklisted(NPCModel.Name) then
-                local Humanoid = NPCModel and NPCModel:FindFirstChildOfClass("Humanoid")
-                if NPCModel and Humanoid and Humanoid.Health > 0 then
-                    local partForChecks = NPCModel:FindFirstChild(SilentAimSettings.TargetPart) or NPCModel.PrimaryPart or NPCModel:FindFirstChild("HumanoidRootPart")
-                    if not partForChecks then continue end
-
-                    if not (SilentAimSettings.VisibleCheck and not isPartVisible(partForChecks, LocalPlayerCharacter.Head.Position)) then
-                        local physicalDist = (localRoot.Position - partForChecks.Position).Magnitude
-                        if physicalDist <= SilentAimSettings.MaxDistance then
-                             if SilentAimSettings.PriorityMode == "Closest Player (No FOV)" then
-                                table.insert(candidates, {character = NPCModel, fov = math.huge, dist = physicalDist, health = Humanoid.Health})
-                            else
-                                local ScreenPosition, OnScreen = GetOnScreenPosition(partForChecks.Position)
-                                if OnScreen then
-                                    local fovDist = (fovCenter - ScreenPosition).Magnitude
-                                    if fovDist <= SilentAimSettings.FOVRadius then
-                                        table.insert(candidates, {character = NPCModel, fov = fovDist, dist = physicalDist, health = Humanoid.Health})
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        if #candidates == 0 then return nil end
-        table.sort(candidates, function(a, b)
-            if SilentAimSettings.PriorityMode == "Lowest Health" then
-                return a.health < b.health
-            elseif SilentAimSettings.PriorityMode == "Closest Distance" or SilentAimSettings.PriorityMode == "Closest Player (No FOV)" then
-                return a.dist < b.dist
-            else
-                return a.fov < b.fov
-            end
-        end)
-        return candidates[1].character
-    end
-
-    function getPolygonPoints(center, radius, sides)
-        local points = {}
-        local rotationOffset = SilentAimSettings.IndicatorRotationEnabled and currentRotationAngle or 0
-        for i = 1, sides do
-            local angle = (i - 1) * (2 * math.pi / sides) - (math.pi / 2) + rotationOffset
-            table.insert(points, Vector2.new(center.X + radius * math.cos(angle), center.Y + radius * math.sin(angle)))
-        end
-        return points
-    end
-
-    function hideAllVisuals()
-        target_indicator_circle.Visible = false
-        for _, line in ipairs(target_indicator_lines) do 
-            line.Visible = false 
-        end
-        for _, text in pairs(overhead_info_texts) do 
-            text.Visible = false 
-        end
-        panel_info_bg.Visible = false
-        for _, text in pairs(panel_info_texts) do 
-            text.Visible = false 
-        end
-        if IndependentPanelFrame then 
-            IndependentPanelFrame.Visible = false 
-        end
-    end
-
-    local lastHealthValues = {}
-    local damageIndicators = {}
-    local DAMAGE_INDICATOR_FADE_TIME = 1
-
-    local pos = SilentAimSettings.IndependentPanelPosition:split(",")
-    IndependentPanelFrame.Position = UDim2.fromOffset(tonumber(pos[1]), tonumber(pos[2]))
-
-    local lastTargetCharacter = nil
-    local lockedRandomPart = nil
-
     local oldNamecall
     if hookmetamethod then
         oldNamecall = hookmetamethod(game, "__namecall", function(...)
@@ -1149,211 +1085,146 @@ if IS_MOBILE then
             return oldRayNew(origin, direction)
         end)
     end
+end
 
-    local GunRemotes = ReplicatedStorage:WaitForChild("GunRemotes", 5)
-    local ShootEvent = GunRemotes and GunRemotes:WaitForChild("ShootEvent", 5)
-    local FuncReload = GunRemotes and GunRemotes:FindFirstChild("FuncReload")
+local aimbotState = {
+    aimbotEnabled = false,
+    aimbotSmoothness = 1,
+    aimbotFOVSize = 100,
+    aimbotFOVColor = Color3.fromRGB(128, 0, 128),
+    aimbotTargetPart = "Head",
+    aimbotTeamCheck = true,
+    aimbotVisibilityCheck = false,
+    showFOV = true,
+    fovType = "LIMITED_FOV",
+    aimbotTeam = "All"
+}
 
-    local IsReloading = false
-    local LastShot = 0
+local FOVring = Drawing.new("Circle")
+FOVring.Visible = false
+FOVring.Thickness = 2
+FOVring.Color = aimbotState.aimbotFOVColor
+FOVring.Filled = false
+FOVring.Radius = aimbotState.aimbotFOVSize
+FOVring.Position = Camera.ViewportSize / 2
 
-    local function GetEquippedGun()
-        local char = Player.Character
-        if not char then return nil end
-        
-        for _, tool in pairs(char:GetChildren()) do
-            if tool:IsA("Tool") then
-                if tool:GetAttribute("ToolType") == "Gun" then
-                    return tool
-                end
-            end
-        end
-        return nil
-    end
+local aimbotConnection
+local aimbotToggleKey = "T"
+local hitboxToggleKey = "G"
 
-    local function UpdateAmmoGUI(ammo, maxAmmo)
-        pcall(function()
-            local playerGui = Player:FindFirstChild("PlayerGui")
-            if not playerGui then return end
-            
-            local home = playerGui:FindFirstChild("Home")
-            if not home then return end
-            
-            local hud = home:FindFirstChild("hud")
-            if not hud then return end
-            
-            local gunFrame = hud:FindFirstChild("BottomRightFrame") and hud.BottomRightFrame:FindFirstChild("GunFrame")
-            if not gunFrame then return end
-            
-            local label = gunFrame:FindFirstChild("BulletsLabel")
-            if label then
-                label.Text = tostring(ammo) .. "/" .. tostring(maxAmmo)
-            end
-        end)
-    end
+local function updateDrawings()
+    local camViewportSize = Camera.ViewportSize
+    FOVring.Position = camViewportSize / 2
+end
 
-    local function ReloadGun()
-        if IsReloading then return false end
-        if not FuncReload then return false end
-        
-        local gun = GetEquippedGun()
-        if not gun then return false end
-        
-        local currentAmmo = gun:GetAttribute("Local_CurrentAmmo") or 0
-        local maxAmmo = gun:GetAttribute("MaxAmmo") or 0
-        
-        if currentAmmo >= maxAmmo then return false end
-        
-        IsReloading = true
-        
-        local success = pcall(function()
-            FuncReload:InvokeServer()
-        end)
-        
-        if success then
-            gun:SetAttribute("Local_CurrentAmmo", maxAmmo)
-            UpdateAmmoGUI(maxAmmo, maxAmmo)
-        end
-        
-        IsReloading = false
-        return success
-    end
+local function lookAt(target, smoothness)
+    local lookVector = (target - Camera.CFrame.Position).unit
+    local newCFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + lookVector)
+    Camera.CFrame = Camera.CFrame:Lerp(newCFrame, smoothness)
+end
 
-    local aimbotState = {
-        aimbotEnabled = false,
-        aimbotSmoothness = 1,
-        aimbotFOVSize = 100,
-        aimbotFOVColor = Color3.fromRGB(128, 0, 128),
-        aimbotTargetPart = "Head",
-        aimbotTeamCheck = true,
-        aimbotVisibilityCheck = false,
-        showFOV = true,
-        fovType = "LIMITED_FOV",
-        aimbotTeam = "All"
-    }
+local function getPlayerTeam(player)
+    if not player.Team then return "Unknown" end
+    local teamName = player.Team.Name
+    if teamName:find("Inmate") then return "Inmates" end
+    if teamName:find("Guard") then return "Guards" end
+    if teamName:find("Criminal") then return "Criminals" end
+    return "Unknown"
+end
 
-    local FOVring = Drawing.new("Circle")
-    FOVring.Visible = false
-    FOVring.Thickness = 2
-    FOVring.Color = aimbotState.aimbotFOVColor
-    FOVring.Filled = false
-    FOVring.Radius = aimbotState.aimbotFOVSize
-    FOVring.Position = Camera.ViewportSize / 2
+local function getTargetPlayer(trg_part, fov, teamCheck, visibilityCheck)
+    local candidates = {}
+    local playerMousePos = Camera.ViewportSize / 2
+    local localPlayer = Player
+    local localTeam = localPlayer.Team
+    local localChar = localPlayer.Character
+    local localPos = localChar and localChar.PrimaryPart and localChar.PrimaryPart.Position or Vector3.zero
 
-    local aimbotConnection
-    local aimbotToggleKey = "T"
-    local hitboxToggleKey = "G"
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == localPlayer then continue end
 
-    local function updateDrawings()
-        local camViewportSize = Camera.ViewportSize
-        FOVring.Position = camViewportSize / 2
-    end
-
-    local function lookAt(target, smoothness)
-        local lookVector = (target - Camera.CFrame.Position).unit
-        local newCFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + lookVector)
-        Camera.CFrame = Camera.CFrame:Lerp(newCFrame, smoothness)
-    end
-
-    local function getPlayerTeam(player)
-        if not player.Team then return "Unknown" end
-        local teamName = player.Team.Name
-        if teamName:find("Inmate") then return "Inmates" end
-        if teamName:find("Guard") then return "Guards" end
-        if teamName:find("Criminal") then return "Criminals" end
-        return "Unknown"
-    end
-
-    local function getTargetPlayer(trg_part, fov, teamCheck, visibilityCheck)
-        local candidates = {}
-        local playerMousePos = Camera.ViewportSize / 2
-        local localPlayer = Player
-        local localTeam = localPlayer.Team
-        local localChar = localPlayer.Character
-        local localPos = localChar and localChar.PrimaryPart and localChar.PrimaryPart.Position or Vector3.zero
-
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player == localPlayer then continue end
-
-            if aimbotState.aimbotTeam ~= "All" then
-                local playerTeam = getPlayerTeam(player)
-                if playerTeam ~= aimbotState.aimbotTeam then
-                    continue
-                end
-            end
-
-            if teamCheck and player.Team and player.Team == localTeam then
+        if aimbotState.aimbotTeam ~= "All" then
+            local playerTeam = getPlayerTeam(player)
+            if playerTeam ~= aimbotState.aimbotTeam then
                 continue
             end
+        end
 
-            local character = player.Character
-            if character then
-                local part = character:FindFirstChild(trg_part)
-                local humanoid = character:FindFirstChildOfClass("Humanoid")
-                if part and humanoid and humanoid.Health > 0 then
-                    local visible = true
-                    if visibilityCheck then
-                        local direction = part.Position - Camera.CFrame.Position
-                        local rayParams = RaycastParams.new()
-                        rayParams.FilterType = Enum.RaycastFilterType.Exclude
-                        rayParams.FilterDescendantsInstances = {localPlayer.Character}
-                        local result = workspace:Raycast(Camera.CFrame.Position, direction, rayParams)
-                        visible = not result or result.Instance:IsDescendantOf(character)
-                    end
-                    if visible then
-                        local ePos, onScreen = Camera:WorldToViewportPoint(part.Position)
-                        local screenDist = (Vector2.new(ePos.X, ePos.Y) - playerMousePos).Magnitude
-                        local threeDDist = (part.Position - localPos).Magnitude
-                        local health = humanoid.Health
-                        local threat = 0
-                        pcall(function()
-                            local scoreFolder = player:FindFirstChild("ScoreFolder")
-                            if scoreFolder then
-                                local kills = scoreFolder:FindFirstChild("Kills")
-                                local assists = scoreFolder:FindFirstChild("Assists")
-                                if kills and assists then
-                                    threat = kills.Value + (assists.Value / 2)
-                                end
+        if teamCheck and player.Team and player.Team == localTeam then
+            continue
+        end
+
+        local character = player.Character
+        if character then
+            local part = character:FindFirstChild(trg_part)
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if part and humanoid and humanoid.Health > 0 then
+                local visible = true
+                if visibilityCheck then
+                    local direction = part.Position - Camera.CFrame.Position
+                    local rayParams = RaycastParams.new()
+                    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                    rayParams.FilterDescendantsInstances = {localPlayer.Character}
+                    local result = workspace:Raycast(Camera.CFrame.Position, direction, rayParams)
+                    visible = not result or result.Instance:IsDescendantOf(character)
+                end
+                if visible then
+                    local ePos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    local screenDist = (Vector2.new(ePos.X, ePos.Y) - playerMousePos).Magnitude
+                    local threeDDist = (part.Position - localPos).Magnitude
+                    local health = humanoid.Health
+                    local threat = 0
+                    pcall(function()
+                        local scoreFolder = player:FindFirstChild("ScoreFolder")
+                        if scoreFolder then
+                            local kills = scoreFolder:FindFirstChild("Kills")
+                            local assists = scoreFolder:FindFirstChild("Assists")
+                            if kills and assists then
+                                threat = kills.Value + (assists.Value / 2)
                             end
-                        end)
-                        local score = 1 / (screenDist + 1) + 1 / (threeDDist + 1) + health / 100 + threat / 10
-                        table.insert(candidates, {Player = player, Part = part, Score = score, ScreenDist = screenDist})
-                    end
+                        end
+                    end)
+                    local score = 1 / (screenDist + 1) + 1 / (threeDDist + 1) + health / 100 + threat / 10
+                    table.insert(candidates, {Player = player, Part = part, Score = score, ScreenDist = screenDist})
                 end
             end
         end
-
-        table.sort(candidates, function(a, b) return a.Score > b.Score end)
-
-        if aimbotState.fovType == "LIMITED_FOV" then
-            for _, candidate in ipairs(candidates) do
-                if candidate.ScreenDist <= fov then
-                    return candidate.Player
-                end
-            end
-            return nil
-        elseif aimbotState.fovType == "FULL_SCREEN" or aimbotState.fovType == "360_DEGREES" then
-            return #candidates > 0 and candidates[1].Player or nil
-        end
-        return nil
     end
 
-    resume(create(function()
-        RenderStepped:Connect(function()
-            if SilentAimSettings.IndicatorRotationEnabled then 
-                currentRotationAngle = (currentRotationAngle + (SilentAimSettings.IndicatorRotationSpeed / 50)) % (math.pi * 2) 
-            end
-            if SilentAimSettings.IndicatorRainbowEnabled or SilentAimSettings.HighlightRainbowEnabled then 
-                currentIndicatorHue = (currentIndicatorHue + (SilentAimSettings.IndicatorRainbowSpeed / 200)) % 1 
-            end
-            
-            local currentTime = tick()
-            for i = #recentShots, 1, -1 do
-                if currentTime - recentShots[i].time > 1 then
-                    table.remove(recentShots, i)
-                end
-            end
+    table.sort(candidates, function(a, b) return a.Score > b.Score end)
 
+    if aimbotState.fovType == "LIMITED_FOV" then
+        for _, candidate in ipairs(candidates) do
+            if candidate.ScreenDist <= fov then
+                return candidate.Player
+            end
+        end
+        return nil
+    elseif aimbotState.fovType == "FULL_SCREEN" or aimbotState.fovType == "360_DEGREES" then
+        return #candidates > 0 and candidates[1].Player or nil
+    end
+    return nil
+end
+
+-- Render loop
+resume(create(function()
+    RenderStepped:Connect(function()
+        if SilentAimSettings.IndicatorRotationEnabled then 
+            currentRotationAngle = (currentRotationAngle + (SilentAimSettings.IndicatorRotationSpeed / 50)) % (math.pi * 2) 
+        end
+        if SilentAimSettings.IndicatorRainbowEnabled or SilentAimSettings.HighlightRainbowEnabled then 
+            currentIndicatorHue = (currentIndicatorHue + (SilentAimSettings.IndicatorRainbowSpeed / 200)) % 1 
+        end
+        
+        local currentTime = tick()
+        for i = #recentShots, 1, -1 do
+            if currentTime - recentShots[i].time > 1 then
+                table.remove(recentShots, i)
+            end
+        end
+
+        -- Target selection for mobile (old method) and for PC visual display
+        if IS_MOBILE then
             currentTargetPart = nil
             local currentTargetCharacter = nil
 
@@ -1447,223 +1318,161 @@ if IS_MOBILE then
                     end
                 end
             end
-
-            if SilentAimSettings.Enabled and currentTargetPart then
-                local humanoid = currentTargetPart.Parent:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    local currentHealth = humanoid.Health
-                    local lastHealth = lastHealthValues[humanoid]
-                    if lastHealth and currentHealth < lastHealth then
-                        local damage = math.floor(lastHealth - currentHealth)
-                        if damage > 0 then
-                            if not pendingDamage[humanoid] then
-                                pendingDamage[humanoid] = { damage = 0, lastUpdate = tick(), position = currentTargetPart.Position }
-                            end
-                            pendingDamage[humanoid].damage = pendingDamage[humanoid].damage + damage
-                            pendingDamage[humanoid].lastUpdate = tick()
-                            pendingDamage[humanoid].position = currentTargetPart.Position
-                        end
+        else -- PC: use new target selection for visual display
+            if SilentAimSettings.Enabled then
+                local camera = workspace.CurrentCamera
+                if camera then
+                    local screenCenter = camera.ViewportSize / 2
+                    if IS_DESKTOP then
+                        local mouse = UserInputService:GetMouseLocation()
+                        screenCenter = Vector2.new(mouse.X, mouse.Y)
                     end
-                    lastHealthValues[humanoid] = currentHealth
-                end
-            end
-            
-            local DAMAGE_ACCUMULATION_WINDOW = 0.15
-            for humanoid, data in pairs(pendingDamage) do
-                if currentTime - data.lastUpdate > DAMAGE_ACCUMULATION_WINDOW then
-                    if SilentAimSettings.ShowDamageNotifier and data.damage > 0 then
-                        local screenPos, onScreen = getPositionOnScreen(data.position)
-                        if onScreen then
-                            local indicator = {} 
-                            indicator.Created = tick() 
-                            indicator.Position = screenPos
-                            indicator.TextObject = Drawing.new("Text")
-                            indicator.TextObject.Font = Drawing.Fonts.Monospace 
-                            indicator.TextObject.Text = string.format("-%d", data.damage)
-                            indicator.TextObject.Color = Color3.fromRGB(255, 50, 50) 
-                            indicator.TextObject.Size = 20
-                            indicator.TextObject.Center = true 
-                            indicator.TextObject.Outline = true
-                            table.insert(damageIndicators, indicator)
-                        end
-                    end
-                    pendingDamage[humanoid] = nil
-                end
-            end
-
-            for i = #damageIndicators, 1, -1 do
-                local indicator = damageIndicators[i]; local age = tick() - indicator.Created
-                if age > DAMAGE_INDICATOR_FADE_TIME then
-                    indicator.TextObject:Remove(); table.remove(damageIndicators, i)
+                    CurrentSilentAimTarget = GetClosestTarget(screenCenter)
                 else
-                    local progress = age / DAMAGE_INDICATOR_FADE_TIME
-                    indicator.TextObject.Position = indicator.Position - Vector2.new(0, progress * 40)
-                    indicator.TextObject.Transparency = progress; indicator.TextObject.Visible = true
+                    CurrentSilentAimTarget = nil
                 end
+            else
+                CurrentSilentAimTarget = nil
             end
 
-            hideAllVisuals()
-            
-            if currentHighlight and (not currentTargetCharacter or not SilentAimSettings.HighlightEnabled) then
-                currentHighlight:Destroy()
-                currentHighlight = nil
+            -- Update currentTargetPart for visual indicators
+            if CurrentSilentAimTarget and CurrentSilentAimTarget.Character then
+                currentTargetPart = GetTargetPart(CurrentSilentAimTarget.Character)
+            else
+                currentTargetPart = nil
             end
+        end
 
-            if SilentAimSettings.Enabled and currentTargetCharacter and SilentAimSettings.HighlightEnabled then
-                 if not currentHighlight then
-                    currentHighlight = Instance.new("Highlight")
-                    currentHighlight.Parent = currentTargetCharacter
-                end
-                currentHighlight.Adornee = currentTargetCharacter
-                currentHighlight.Enabled = true
-                currentHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                if SilentAimSettings.HighlightRainbowEnabled then
-                    local rainbowColor = Color3.fromHSV(currentIndicatorHue, 1, 1)
-                    currentHighlight.FillColor = rainbowColor
-                    currentHighlight.OutlineColor = rainbowColor
-                    currentHighlight.FillTransparency = 0.5
-                    currentHighlight.OutlineTransparency = 0
-                else
-                    currentHighlight.FillColor = SilentAimSettings.HighlightColor
-                    currentHighlight.OutlineColor = SilentAimSettings.HighlightColor
-                    currentHighlight.FillTransparency = 0.5
-                    currentHighlight.OutlineTransparency = 0
-                end
-            end
-
-            if SilentAimSettings.Enabled and currentTargetPart then
-                local RootToViewportPoint, IsOnScreen = getPositionOnScreen(currentTargetPart.Position)
-
-                if IsOnScreen and SilentAimSettings.ShowSilentAimTarget then
-                    local indicatorRadius = SilentAimSettings.TargetIndicatorRadius
-                    local indicatorStyle = "Circle"
-                    local finalIndicatorColor
-                    local isTargetVisible = isPartVisible(currentTargetPart)
-                    if isTargetVisible then 
-                        finalIndicatorColor = Color3.fromRGB(0, 255, 0)
-                        indicatorRadius = indicatorRadius * 0.6
-                    elseif SilentAimSettings.IndicatorRainbowEnabled then 
-                        finalIndicatorColor = Color3.fromHSV(currentIndicatorHue, 1, 1)
-                    else 
-                        finalIndicatorColor = Color3.fromRGB(255, 0, 0)
-                    end
-                    
-                    if indicatorStyle == "Circle" then
-                        target_indicator_circle.Visible = true
-                        target_indicator_circle.Color = finalIndicatorColor
-                        target_indicator_circle.Radius = indicatorRadius
-                        target_indicator_circle.Position = RootToViewportPoint
+        -- Damage indicators (common)
+        if SilentAimSettings.Enabled and currentTargetPart then
+            local humanoid = currentTargetPart.Parent:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                local currentHealth = humanoid.Health
+                local lastHealth = lastHealthValues[humanoid]
+                if lastHealth and currentHealth < lastHealth then
+                    local damage = math.floor(lastHealth - currentHealth)
+                    if damage > 0 then
+                        if not pendingDamage[humanoid] then
+                            pendingDamage[humanoid] = { damage = 0, lastUpdate = tick(), position = currentTargetPart.Position }
+                        end
+                        pendingDamage[humanoid].damage = pendingDamage[humanoid].damage + damage
+                        pendingDamage[humanoid].lastUpdate = tick()
+                        pendingDamage[humanoid].position = currentTargetPart.Position
                     end
                 end
+                lastHealthValues[humanoid] = currentHealth
             end
-            
-            if FOVCircleGui and FOVCircleGui.Enabled then
-                if SilentAimSettings.FixedFOV then 
-                    FOVCircleFrame.Position = UDim2.fromScale(0.5, 0.5) 
+        end
+        
+        local DAMAGE_ACCUMULATION_WINDOW = 0.15
+        for humanoid, data in pairs(pendingDamage) do
+            if currentTime - data.lastUpdate > DAMAGE_ACCUMULATION_WINDOW then
+                if SilentAimSettings.ShowDamageNotifier and data.damage > 0 then
+                    local screenPos, onScreen = getPositionOnScreen(data.position)
+                    if onScreen then
+                        local indicator = {} 
+                        indicator.Created = tick() 
+                        indicator.Position = screenPos
+                        indicator.TextObject = Drawing.new("Text")
+                        indicator.TextObject.Font = Drawing.Fonts.Monospace 
+                        indicator.TextObject.Text = string.format("-%d", data.damage)
+                        indicator.TextObject.Color = Color3.fromRGB(255, 50, 50) 
+                        indicator.TextObject.Size = 20
+                        indicator.TextObject.Center = true 
+                        indicator.TextObject.Outline = true
+                        table.insert(damageIndicators, indicator)
+                    end
+                end
+                pendingDamage[humanoid] = nil
+            end
+        end
+
+        for i = #damageIndicators, 1, -1 do
+            local indicator = damageIndicators[i]; local age = tick() - indicator.Created
+            if age > DAMAGE_INDICATOR_FADE_TIME then
+                indicator.TextObject:Remove(); table.remove(damageIndicators, i)
+            else
+                local progress = age / DAMAGE_INDICATOR_FADE_TIME
+                indicator.TextObject.Position = indicator.Position - Vector2.new(0, progress * 40)
+                indicator.TextObject.Transparency = progress; indicator.TextObject.Visible = true
+            end
+        end
+
+        hideAllVisuals()
+        
+        if currentHighlight and (not currentTargetPart or not SilentAimSettings.HighlightEnabled) then
+            currentHighlight:Destroy()
+            currentHighlight = nil
+        end
+
+        if SilentAimSettings.Enabled and currentTargetPart and SilentAimSettings.HighlightEnabled then
+             if not currentHighlight then
+                currentHighlight = Instance.new("Highlight")
+                currentHighlight.Parent = currentTargetPart.Parent
+            end
+            currentHighlight.Adornee = currentTargetPart.Parent
+            currentHighlight.Enabled = true
+            currentHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            if SilentAimSettings.HighlightRainbowEnabled then
+                local rainbowColor = Color3.fromHSV(currentIndicatorHue, 1, 1)
+                currentHighlight.FillColor = rainbowColor
+                currentHighlight.OutlineColor = rainbowColor
+                currentHighlight.FillTransparency = 0.5
+                currentHighlight.OutlineTransparency = 0
+            else
+                currentHighlight.FillColor = SilentAimSettings.HighlightColor
+                currentHighlight.OutlineColor = SilentAimSettings.HighlightColor
+                currentHighlight.FillTransparency = 0.5
+                currentHighlight.OutlineTransparency = 0
+            end
+        end
+
+        if SilentAimSettings.Enabled and currentTargetPart then
+            local RootToViewportPoint, IsOnScreen = getPositionOnScreen(currentTargetPart.Position)
+
+            if IsOnScreen and SilentAimSettings.ShowSilentAimTarget then
+                local indicatorRadius = SilentAimSettings.TargetIndicatorRadius
+                local indicatorStyle = "Circle"
+                local finalIndicatorColor
+                local isTargetVisible = isPartVisible(currentTargetPart)
+                if isTargetVisible then 
+                    finalIndicatorColor = Color3.fromRGB(0, 255, 0)
+                    indicatorRadius = indicatorRadius * 0.6
+                elseif SilentAimSettings.IndicatorRainbowEnabled then 
+                    finalIndicatorColor = Color3.fromHSV(currentIndicatorHue, 1, 1)
                 else 
-                    local mousePos = GetMouseLocation(UserInputService)
-                    FOVCircleFrame.Position = UDim2.fromOffset(mousePos.X, mousePos.Y) 
+                    finalIndicatorColor = Color3.fromRGB(255, 0, 0)
+                end
+                
+                if indicatorStyle == "Circle" then
+                    target_indicator_circle.Visible = true
+                    target_indicator_circle.Color = finalIndicatorColor
+                    target_indicator_circle.Radius = indicatorRadius
+                    target_indicator_circle.Position = RootToViewportPoint
                 end
             end
-            
-            updateDrawings()
-            FOVring.Visible = aimbotState.showFOV and aimbotState.aimbotEnabled and aimbotState.fovType == "LIMITED_FOV" or false
-            
-            if aimbotState.aimbotEnabled then
-                local closest = getTargetPlayer(aimbotState.aimbotTargetPart or "Head", aimbotState.aimbotFOVSize, aimbotState.aimbotTeamCheck, aimbotState.aimbotVisibilityCheck)
-                if closest and closest.Character and closest.Character:FindFirstChild(aimbotState.aimbotTargetPart or "Head") then
-                    lookAt(closest.Character[aimbotState.aimbotTargetPart or "Head"].Position, aimbotState.aimbotSmoothness)
-                end
+        end
+        
+        if FOVCircleGui and FOVCircleGui.Enabled then
+            if SilentAimSettings.FixedFOV then 
+                FOVCircleFrame.Position = UDim2.fromScale(0.5, 0.5) 
+            else 
+                local mousePos = GetMouseLocation(UserInputService)
+                FOVCircleFrame.Position = UDim2.fromOffset(mousePos.X, mousePos.Y) 
             end
-        end)
-    end))
-end
-
-function createWelcomePopup()
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "WelcomePopup"
-    gui.Parent = Player:WaitForChild("PlayerGui")
-    gui.ResetOnSpawn = false
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.IgnoreGuiInset = true
-
-    local popup = Instance.new("Frame")
-    popup.Parent = gui
-    popup.Size = UDim2.new(0, 400, 0, 200)
-    popup.Position = UDim2.new(0.5, -200, 0.5, -100)
-    popup.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    popup.BorderSizePixel = 0
-    local corner = Instance.new("UICorner", popup)
-    corner.CornerRadius = UDim.new(0, 8)
-
-    local title = Instance.new("TextLabel")
-    title.Parent = popup
-    title.Size = UDim2.new(1, 0, 0, 40)
-    title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.Text = "Hi, " .. playerName .. "!"
-    title.TextColor3 = Color3.fromRGB(0, 255, 100)
-    title.TextSize = 24
-    title.TextXAlignment = Enum.TextXAlignment.Center
-
-    local content = Instance.new("TextLabel")
-    content.Parent = popup
-    content.Position = UDim2.new(0, 20, 0, 45)
-    content.Size = UDim2.new(1, -40, 0, 60)
-    content.BackgroundTransparency = 1
-    content.Font = Enum.Font.Gotham
-    content.Text = "Welcome to Synergy Hub! Report bugs on the discord server"
-    content.TextColor3 = Color3.fromRGB(200, 200, 200)
-    content.TextSize = 14
-    content.TextWrapped = true
-    content.TextXAlignment = Enum.TextXAlignment.Center
-
-    local btnFrame = Instance.new("Frame")
-    btnFrame.Parent = popup
-    btnFrame.Position = UDim2.new(0, 20, 1, -50)
-    btnFrame.Size = UDim2.new(1, -40, 0, 40)
-    btnFrame.BackgroundTransparency = 1
-
-    local copyBtn = Instance.new("TextButton")
-    copyBtn.Parent = btnFrame
-    copyBtn.Size = UDim2.new(0.5, -5, 1, 0)
-    copyBtn.Position = UDim2.new(0, 0, 0, 0)
-    copyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    copyBtn.Font = Enum.Font.Gotham
-    copyBtn.Text = "Copy Discord"
-    copyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    copyBtn.TextSize = 14
-    local copyCorner = Instance.new("UICorner", copyBtn)
-    copyCorner.CornerRadius = UDim.new(0, 4)
-
-    local okBtn = Instance.new("TextButton")
-    okBtn.Parent = btnFrame
-    okBtn.Size = UDim2.new(0.5, -5, 1, 0)
-    okBtn.Position = UDim2.new(0.5, 5, 0, 0)
-    okBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
-    okBtn.Font = Enum.Font.Gotham
-    okBtn.Text = "Okay"
-    okBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-    okBtn.TextSize = 14
-    local okCorner = Instance.new("UICorner", okBtn)
-    okCorner.CornerRadius = UDim.new(0, 4)
-
-    copyBtn.MouseButton1Click:Connect(function()
-        pcall(function()
-            setclipboard("discord.gg/nCNASmNRTE")
-        end)
-        SynergyUI:Notify("Invite copied", 2, Color3.fromRGB(0, 255, 100))
-    end)
-
-    okBtn.MouseButton1Click:Connect(function()
-        gui:Destroy()
-        if not Window then
-            createMainWindow()
-        else
-            Window.Gui.Enabled = true
+        end
+        
+        updateDrawings()
+        FOVring.Visible = aimbotState.showFOV and aimbotState.aimbotEnabled and aimbotState.fovType == "LIMITED_FOV" or false
+        
+        if aimbotState.aimbotEnabled then
+            local closest = getTargetPlayer(aimbotState.aimbotTargetPart or "Head", aimbotState.aimbotFOVSize, aimbotState.aimbotTeamCheck, aimbotState.aimbotVisibilityCheck)
+            if closest and closest.Character and closest.Character:FindFirstChild(aimbotState.aimbotTargetPart or "Head") then
+                lookAt(closest.Character[aimbotState.aimbotTargetPart or "Head"].Position, aimbotState.aimbotSmoothness)
+            end
         end
     end)
-end
+end))
 
 function createMainWindow()
     Window = SynergyUI:CreateWindow({
@@ -1687,39 +1496,12 @@ function createMainWindow()
     local MiscTab = Window:CreateTab("Misc", nil)
     local PlayerTab = Window:CreateTab("Player", nil)
 
-    InfoTab:CreateParagraph({
-        Title = "",
-        Content = "",
-        Image = "https://raw.githubusercontent.com/Xyraniz/Synergy-Hub/refs/heads/main/Banner_SynergyHub.jpg"
-    })
-
-    InfoTab:CreateParagraph({
-        Title = "What is Synergy Hub?",
-        Content = "A Roblox script hub with universal and game-specific scripts. Designed to enhance your gaming experience."
-    })
-
-    InfoTab:CreateParagraph({
-        Title = "Credits",
-        Content = "Xyraniz\nSynergyUI © Synergy Hub — GitHub"
-    })
-
-    InfoTab:CreateButton({
-        Name = "Discord Server",
-        Callback = function()
-            pcall(function()
-                setclipboard("discord.gg/nCNASmNRTE")
-            end)
-            SynergyUI:Notify("Invite copied", 2, Color3.fromRGB(0, 255, 100))
-        end
-    })
-
-    InfoTab:CreateKeybind({
-        Name = "Synergy Hub Key",
-        CurrentKeybind = "X",
-        Callback = function(v)
-            Window.ToggleKey = Enum.KeyCode[v]
-        end
-    })
+    -- Simplified Info Tab
+    InfoTab:CreateSection("Information")
+    InfoTab:CreateParagraph({Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in games."})
+    InfoTab:CreateParagraph({Title = "Credits", Content = "Xyraniz\nSynergy Team"})
+    InfoTab:CreateButton({Name = "Discord Server", Callback = function() setclipboard("discord.gg/nCNASmNRTE") end})
+    InfoTab:CreateKeybind({Name = "Menu Keybind", CurrentKeybind = "X", Flag = "MenuKeybind", Callback = function(key) Window:Toggle() end})
 
     AimbotTab:CreateKeybind({
         Name = "Aimbot Toggle Key",
@@ -1865,18 +1647,23 @@ function createMainWindow()
     })
 
     SilentAimTab:CreateSlider({
+        Name = "Miss Spread",
+        Range = {0, 50},
+        Increment = 1,
+        CurrentValue = SilentAimSettings.MissSpread,
+        Callback = function(v)
+            SilentAimSettings.MissSpread = v
+        end
+    })
+
+    SilentAimTab:CreateSlider({
         Name = "Field of View",
         Range = {50, 500},
         Increment = 10,
         CurrentValue = SilentAimSettings.FOVRadius,
         Callback = function(v)
             SilentAimSettings.FOVRadius = v
-            if FOVCircleGui then
-                FOVCircleFrame.Size = UDim2.fromOffset(v * 2, v * 2)
-            end
-            if IS_DESKTOP and SilentAimFOV then
-                SilentAimFOV.Radius = v
-            end
+            FOVCircleFrame.Size = UDim2.fromOffset(v * 2, v * 2)
         end
     })
 
@@ -1885,9 +1672,7 @@ function createMainWindow()
         CurrentValue = SilentAimSettings.FOVVisible,
         Callback = function(v)
             SilentAimSettings.FOVVisible = v
-            if FOVCircleGui then
-                FOVCircleGui.Enabled = v
-            end
+            FOVCircleGui.Enabled = v
         end
     })
 
@@ -1901,10 +1686,18 @@ function createMainWindow()
 
     SilentAimTab:CreateDropdown({
         Name = "Target Part",
-        Options = {"Head", "HumanoidRootPart", "Random"},
+        Options = {"Head", "HumanoidRootPart", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg", "Random"},
         CurrentOption = SilentAimSettings.TargetPart,
         Callback = function(v)
             SilentAimSettings.TargetPart = v
+        end
+    })
+
+    SilentAimTab:CreateToggle({
+        Name = "Random Parts",
+        CurrentValue = SilentAimSettings.RandomAimParts,
+        Callback = function(v)
+            SilentAimSettings.RandomAimParts = v
         end
     })
 
@@ -1919,44 +1712,42 @@ function createMainWindow()
     })
 
     SilentAimTab:CreateToggle({
-        Name = "Wallbang",
-        CurrentValue = SilentAimSettings.Wallbang,
+        Name = "Death Check",
+        CurrentValue = SilentAimSettings.DeathCheck,
         Callback = function(v)
-            SilentAimSettings.Wallbang = v
+            SilentAimSettings.DeathCheck = v
         end
     })
 
     SilentAimTab:CreateToggle({
-        Name = "Hit Exposed Parts",
-        CurrentValue = SilentAimSettings.LeakAndHitMode,
+        Name = "ForceField Check",
+        CurrentValue = SilentAimSettings.ForceFieldCheck,
         Callback = function(v)
-            SilentAimSettings.LeakAndHitMode = v
-        end
-    })
-
-    SilentAimTab:CreateDropdown({
-        Name = "Target Type",
-        Options = {"Players", "NPCs", "All"},
-        CurrentOption = SilentAimSettings.TargetMode,
-        Callback = function(v)
-            SilentAimSettings.TargetMode = v
-        end
-    })
-
-    SilentAimTab:CreateDropdown({
-        Name = "Silent Aim Method",
-        Options = {"Raycast", "FindPartOnRay", "Mouse.Hit/Target"},
-        CurrentOption = SilentAimSettings.SilentAimMethod,
-        Callback = function(v)
-            SilentAimSettings.SilentAimMethod = v
+            SilentAimSettings.ForceFieldCheck = v
         end
     })
 
     SilentAimTab:CreateToggle({
-        Name = "Prediction",
-        CurrentValue = SilentAimSettings.MouseHitPrediction,
+        Name = "Auto Reload",
+        CurrentValue = SilentAimSettings.AutoReload,
         Callback = function(v)
-            SilentAimSettings.MouseHitPrediction = v
+            SilentAimSettings.AutoReload = v
+        end
+    })
+
+    SilentAimTab:CreateToggle({
+        Name = "Show Target Line",
+        CurrentValue = SilentAimSettings.ShowTargetLine,
+        Callback = function(v)
+            SilentAimSettings.ShowTargetLine = v
+        end
+    })
+
+    SilentAimTab:CreateToggle({
+        Name = "Dynamic FOV",
+        CurrentValue = SilentAimSettings.DynamicFOV,
+        Callback = function(v)
+            SilentAimSettings.DynamicFOV = v
         end
     })
 
@@ -1968,6 +1759,7 @@ function createMainWindow()
         end
     })
 
+    -- Hitbox tab (unchanged from deepseek.lua)
     local HitboxSettings = {
         Enabled = false,
         TeamCheck = true,
@@ -2147,6 +1939,7 @@ function createMainWindow()
         end
     })
 
+    -- ESP/Highlights tab (unchanged from deepseek.lua)
     local ESPSettings = {
         Inmates = false,
         Guards = false,
@@ -2306,6 +2099,7 @@ function createMainWindow()
         end
     })
 
+    -- TP Tab (unchanged)
     local function teleportAndPickupWeapon(targetPos)
         local Character = Player.Character or Player.CharacterAdded:Wait()
         local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
@@ -2454,6 +2248,7 @@ function createMainWindow()
         end,
     })
 
+    -- Misc Tab (unchanged)
     local NoTaseMode = false
 
     local function setInputState(active)
@@ -2658,6 +2453,7 @@ function createMainWindow()
         end
     })
 
+    -- Player Tab (unchanged)
     local PlayerFeatures = {
         WalkSpeed = 16,
         JumpPower = 50,
@@ -2866,7 +2662,7 @@ function createMainWindow()
     end)
 end
 
-createWelcomePopup()
+createMainWindow()
 
 aimbotToggleKey = "T"
 hitboxToggleKey = "G"
@@ -2879,11 +2675,28 @@ task.spawn(function()
     end
 end)
 
+-- PC Silent Aim initialization
+if IS_DESKTOP then
+    SetupPCControls()
+    SetupToggleKey()
+    -- Auto-fire support
+    RunService.Heartbeat:Connect(function()
+        if IsSilentAimShooting then
+            local gun = GetEquippedGun()
+            if gun and gun:GetAttribute("AutoFire") then
+                FireSilentAim()
+            end
+        end
+    end)
+end
+
 game:GetService("CoreGui").ChildRemoved:Connect(function(child)
     if child.Name == "SynergyUI" then
-        if oldNamecall then oldNamecall:UnHook() end
-        if oldIndex then oldIndex:UnHook() end
-        if oldRayNew then oldRayNew:UnHook() end
+        if IS_MOBILE then
+            if oldNamecall then oldNamecall:UnHook() end
+            if oldIndex then oldIndex:UnHook() end
+            if oldRayNew then oldRayNew:UnHook() end
+        end
         if FOVCircleGui then FOVCircleGui:Destroy() end
         if IndependentPanelGui then IndependentPanelGui:Destroy() end
         if currentHighlight then currentHighlight:Destroy() end
