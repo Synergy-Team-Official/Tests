@@ -343,6 +343,7 @@ local HitboxTab = Window:CreateTab("Hitbox")
 local VisualTab = Window:CreateTab("ESP")
 local MiscTab = Window:CreateTab("Misc")
 local FunTab = Window:CreateTab("Fun Stuff")
+local TeleportTab = Window:CreateTab("Teleporting")
 
 InfoTab:CreateSection("Information")
 InfoTab:CreateParagraph({Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in games."})
@@ -400,6 +401,50 @@ AimbotTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(128, 0,
 AimbotTab:CreateSlider({ Name = "FOV Size", Range = {50, 500}, Increment = 10, CurrentValue = 100, Callback = function(v) aimbotState.fovSize = v; if FOVring then FOVring.Radius = v end end })
 AimbotTab:CreateDropdown({ Name = "Target Part", Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"}, CurrentOption = "Head", Callback = function(v) aimbotState.targetPart = v end })
 AimbotTab:CreateToggle({ Name = "Wall Check", CurrentValue = false, Callback = function(v) aimbotState.visibilityCheck = v end })
+
+AimbotTab:CreateSection("Kill Aura")
+local KillAuraEnabled = false
+local KillAuraRange = 500
+local function getClosestPlayerForKillAura()
+    local closest, shortest = nil, math.huge
+    local localPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character.HumanoidRootPart.Position or Vector3.zero
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and not IsTeammateGlobal(player) then
+            local char = player.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local hrp = char.HumanoidRootPart
+                local dist = (hrp.Position - localPos).Magnitude
+                if dist < shortest and dist <= KillAuraRange then
+                    shortest = dist
+                    closest = player
+                end
+            end
+        end
+    end
+    return closest
+end
+local function shootAtPlayer(player)
+    if not player or not player.Character then return end
+    local targetHead = player.Character:FindFirstChild("Head")
+    if not targetHead then return end
+    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    if tool then
+        local mainEvent = ReplicatedStorage:FindFirstChild("MainEvent")
+        if mainEvent then
+            mainEvent:FireServer("ShootGun", tool:FindFirstChild("Handle"), tool.Handle.CFrame.Position, targetHead.Position, targetHead, Vector3.new(0,0,-1))
+        end
+    end
+end
+RunService.Heartbeat:Connect(function()
+    if KillAuraEnabled then
+        local target = getClosestPlayerForKillAura()
+        if target then
+            shootAtPlayer(target)
+        end
+    end
+end)
+AimbotTab:CreateToggle({ Name = "Enable Kill Aura", CurrentValue = false, Callback = function(v) KillAuraEnabled = v end })
+AimbotTab:CreateSlider({ Name = "Range", Range = {0, 300}, Increment = 5, CurrentValue = 500, Callback = function(v) KillAuraRange = v end })
 
 HitboxTab:CreateToggle({ Name = "Enable Hitbox", CurrentValue = false, Callback = function(v)
     HitboxSettings.Enabled = v
@@ -494,6 +539,196 @@ VisualTab:CreateToggle({ Name = "Enable ESP Teammates", CurrentValue = false, Ca
 end })
 VisualTab:CreateColorPicker({ Name = "Teammates Color", Color = Color3.fromRGB(135, 206, 235), Callback = function(v) ESPSettings.Highlights.TeammatesColor = v end })
 
+MiscTab:CreateSection("Auto Stomp")
+local AutoStomp = false
+local RATE_PER_SECOND = 2
+RunService.Stepped:Connect(function()
+    if AutoStomp then
+        local mainEvent = ReplicatedStorage:FindFirstChild("MainEvent")
+        if mainEvent then mainEvent:FireServer("Stomp") end
+    end
+end)
+MiscTab:CreateToggle({ Name = "Auto Stomp", CurrentValue = false, Callback = function(v) AutoStomp = v end })
+MiscTab:CreateSlider({ Name = "Stomps Per Second", Range = {0, 10}, Increment = 1, CurrentValue = RATE_PER_SECOND, Callback = function(v) RATE_PER_SECOND = v end })
+
+MiscTab:CreateSection("Anti Stomp (KO Protection)")
+local DestroyWhenKO = false
+local KOConnection = nil
+KOConnection = RunService.Heartbeat:Connect(function()
+    if not DestroyWhenKO then return end
+    pcall(function()
+        local char = LocalPlayer.Character
+        local bodyEffects = char and char:FindFirstChild("BodyEffects")
+        local ko = bodyEffects and bodyEffects:FindFirstChild("K.O")
+        if ko and ko.Value == true and not char:GetAttribute("DestroyedOnKO") then
+            char:SetAttribute("DestroyedOnKO", true)
+            for _, v in pairs(char:GetChildren()) do
+                if v:IsA("BasePart") then
+                    v:BreakJoints()
+                    v:Destroy()
+                elseif v:IsA("Accessory") or v:IsA("Decal") then
+                    v:Destroy()
+                end
+            end
+        end
+    end)
+end)
+MiscTab:CreateToggle({ Name = "Anti Stomp", CurrentValue = false, Callback = function(v) DestroyWhenKO = v end })
+
+MiscTab:CreateSection("Movement Modifiers")
+local AntiFlingEnabled = false
+RunService.Stepped:Connect(function()
+    if AntiFlingEnabled then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp and hrp.Velocity.magnitude > 1000 then
+                    hrp.Velocity = Vector3.zero
+                    hrp.RotVelocity = Vector3.zero
+                end
+            end
+        end
+    end
+end)
+MiscTab:CreateToggle({ Name = "Anti-Fling", CurrentValue = false, Callback = function(v) AntiFlingEnabled = v end })
+
+local PreventSitEnabled = false
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if PreventSitEnabled then
+        local humanoid = char:WaitForChild("Humanoid")
+        humanoid:GetPropertyChangedSignal("Sit"):Connect(function()
+            if humanoid.Sit then
+                task.wait(0.01)
+                humanoid.Sit = false
+            end
+        end)
+    end
+end)
+MiscTab:CreateToggle({ Name = "Prevent Sit", CurrentValue = false, Callback = function(v)
+    PreventSitEnabled = v
+    if v and LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:GetPropertyChangedSignal("Sit"):Connect(function()
+                if humanoid.Sit then
+                    task.wait(0.01)
+                    humanoid.Sit = false
+                end
+            end)
+        end
+    end
+end })
+
+local AlwaysSprintEnabled = false
+task.spawn(function()
+    while true do
+        if AlwaysSprintEnabled then
+            local vim = game:GetService("VirtualInputManager")
+            vim:SendKeyEvent(true, Enum.KeyCode.LeftShift, true, game)
+            task.wait(1)
+        else
+            task.wait(1)
+        end
+    end
+end)
+MiscTab:CreateToggle({ Name = "Always Sprint", CurrentValue = false, Callback = function(v) AlwaysSprintEnabled = v end })
+
+local AntiVoidEnabled = false
+local safePosition = Vector3.zero
+local function updateSafePosition()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        local pos = char.HumanoidRootPart.Position
+        if pos.Y > -25 then safePosition = pos end
+    end
+end
+RunService.Heartbeat:Connect(function()
+    if not AntiVoidEnabled then return end
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        local pos = char.HumanoidRootPart.Position
+        if pos.Y < -25 then
+            char.HumanoidRootPart.Velocity = Vector3.zero
+            char.HumanoidRootPart.CFrame = CFrame.new(safePosition + Vector3.new(0, 5, 0))
+        else
+            updateSafePosition()
+        end
+    end
+end)
+MiscTab:CreateToggle({ Name = "Anti Void", CurrentValue = false, Callback = function(v) AntiVoidEnabled = v end })
+
+local NoSlowEnabled = false
+local DEFAULT_SPEED = 16
+RunService.RenderStepped:Connect(function()
+    if not NoSlowEnabled then return end
+    local char = LocalPlayer.Character
+    if char then
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        local tool = char:FindFirstChildOfClass("Tool")
+        if humanoid and tool and humanoid.WalkSpeed < DEFAULT_SPEED then
+            humanoid.WalkSpeed = DEFAULT_SPEED
+        end
+    end
+end)
+MiscTab:CreateToggle({ Name = "No Slow (reload)", CurrentValue = false, Callback = function(v) NoSlowEnabled = v end })
+
+local NoJumpCooldownEnabled = false
+RunService.RenderStepped:Connect(function()
+    if not NoJumpCooldownEnabled then return end
+    local char = LocalPlayer.Character
+    if char then
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.UseJumpPower = false
+        end
+    end
+end)
+MiscTab:CreateToggle({ Name = "No Jump Cooldown", CurrentValue = false, Callback = function(v) NoJumpCooldownEnabled = v end })
+
+MiscTab:CreateSection("Auto Reload")
+local AutoReloadEnabled = false
+local ReloadMethod = "Normal"
+local function getTool()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChildOfClass("Tool")
+end
+local function reloadTool()
+    local tool = getTool()
+    if not tool then return end
+    local ammoValue = nil
+    if game.PlaceId == 2788229376 then
+        ammoValue = tool:FindFirstChild("Ammo")
+    else
+        local toolScript = tool:FindFirstChild("Script")
+        if toolScript then
+            ammoValue = toolScript:FindFirstChild("Ammo")
+        end
+    end
+    if ammoValue and ammoValue:IsA("IntValue") then
+        local threshold = (ReloadMethod == "Rifle" and 1) or 0
+        if ammoValue.Value <= threshold then
+            local mainEvent = ReplicatedStorage:FindFirstChild("MainEvent")
+            if mainEvent then
+                mainEvent:FireServer("Reload", tool)
+            end
+        end
+    end
+end
+local function startAutoReload()
+    if ReloadConnection then ReloadConnection:Disconnect() end
+    ReloadConnection = RunService.RenderStepped:Connect(function()
+        if AutoReloadEnabled then
+            reloadTool()
+        end
+    end)
+end
+MiscTab:CreateToggle({ Name = "Auto Reload", CurrentValue = false, Callback = function(v)
+    AutoReloadEnabled = v
+    if v then startAutoReload() else if ReloadConnection then ReloadConnection:Disconnect() end end
+end })
+MiscTab:CreateDropdown({ Name = "Reload Method", Options = {"Normal", "Rifle", "HoodCustoms"}, CurrentOption = "Normal", Callback = function(v) ReloadMethod = v end })
+
+MiscTab:CreateSection("Fake Macro (Original)")
 local macroEnabled = false
 local macroSpeed = 325
 local macroKey = Enum.KeyCode.Z
@@ -563,49 +798,158 @@ local macroConnection = RunService.RenderStepped:Connect(function()
     end
 end)
 
-MiscTab:CreateToggle({
-    Name = "Fake Macro",
-    CurrentValue = false,
-    Callback = function(v)
-        if v then
-            toggleMacro()
-        else
-            if macroEnabled then toggleMacro() end
+MiscTab:CreateToggle({ Name = "Fake Macro", CurrentValue = false, Callback = function(v) if v then toggleMacro() else if macroEnabled then toggleMacro() end end end })
+MiscTab:CreateDropdown({ Name = "Macro Speed", Options = {"SLOW", "NORMAL", "FAST"}, CurrentOption = "NORMAL", Callback = function(v)
+    if v == "SLOW" then macroSpeed = 250
+    elseif v == "NORMAL" then macroSpeed = 325
+    else macroSpeed = 500 end
+    if macroEnabled then
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then humanoid.WalkSpeed = macroSpeed end
         end
     end
-})
+end })
+MiscTab:CreateKeybind({ Name = "Macro Keybind", CurrentKeybind = "Z", Callback = function(key) toggleMacro() end })
 
-MiscTab:CreateDropdown({
-    Name = "Macro Speed",
-    Options = {"SLOW", "NORMAL", "FAST"},
-    CurrentOption = "NORMAL",
-    Callback = function(v)
-        if v == "SLOW" then
-            macroSpeed = 250
-        elseif v == "NORMAL" then
-            macroSpeed = 325
-        elseif v == "FAST" then
-            macroSpeed = 500
-        end
-        if macroEnabled then
-            local character = LocalPlayer.Character
-            if character then
-                local humanoid = character:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    humanoid.WalkSpeed = macroSpeed
+MiscTab:CreateSection("Auto Buy (Guns & Armor)")
+local AutoBuyEnabled = false
+local AutoBuyGuns = {}
+local AutoBuyArmor = false
+
+local ShopTable = {}
+local ShopOptions = {}
+local function buildShopTable()
+    ShopTable = {}
+    ShopOptions = {}
+    local shopFolder = workspace:FindFirstChild("Ignored") and workspace.Ignored:FindFirstChild("Shop")
+    if not shopFolder then return end
+    for _, shop in pairs(shopFolder:GetChildren()) do
+        if shop:FindFirstChild("Head") then
+            local head = shop.Head
+            local shopName = shop.Name
+            local gui = head:FindFirstChildWhichIsA("BillboardGui") or head:FindFirstChildWhichIsA("SurfaceGui")
+            if gui then
+                local textLabel = gui:FindFirstChildWhichIsA("TextLabel")
+                if textLabel and textLabel.Text ~= "" then shopName = textLabel.Text end
+            end
+            if head:FindFirstChildWhichIsA("TextLabel") then
+                shopName = head:FindFirstChildWhichIsA("TextLabel").Text
+            end
+            local key = shopName:match("^(%[.-%])")
+            if key then
+                local ammoKey = shopName:match("(%[.-%sAmmo%])")
+                if ammoKey then key = ammoKey end
+                ShopTable[key] = { ShopName = shopName }
+                if not key:match("Ammo") and not key:match("Armor") then
+                    table.insert(ShopOptions, key)
                 end
+            else
+                ShopTable[shopName] = { ShopName = shopName }
             end
         end
     end
-})
+    table.sort(ShopOptions)
+end
+buildShopTable()
+task.spawn(function() while wait(30) do buildShopTable() end end)
 
-MiscTab:CreateKeybind({
-    Name = "Macro Keybind",
-    CurrentKeybind = "Z",
-    Callback = function(key)
-        toggleMacro()
+local function getInventoryAmmo(gunName)
+    local inv = LocalPlayer:FindFirstChild("DataFolder") and LocalPlayer.DataFolder:FindFirstChild("Inventory")
+    if not inv then return 0 end
+    local ammo = inv:FindFirstChild(gunName)
+    return ammo and tonumber(ammo.Value) or 0
+end
+local function hasArmor()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    local body = char:FindFirstChild("BodyEffects")
+    if body and body:FindFirstChild("Armor") then
+        return body.Armor.Value > 0
     end
-})
+    return false
+end
+
+local buyQueue = {}
+local currentBuying = nil
+
+RunService.Heartbeat:Connect(function()
+    if not AutoBuyEnabled then return end
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not char or not hrp then return end
+
+    pcall(function()
+        if not currentBuying and #buyQueue == 0 then
+            local orderedGuns = {}
+            for gun in pairs(AutoBuyGuns) do table.insert(orderedGuns, gun) end
+            table.sort(orderedGuns)
+            for _, gun in ipairs(orderedGuns) do
+                local hasGun = char:FindFirstChild(gun) or LocalPlayer.Backpack:FindFirstChild(gun)
+                if not hasGun then
+                    if ShopTable[gun] then
+                        table.insert(buyQueue, { type = "gun", name = gun })
+                    end
+                else
+                    local invAmmo = getInventoryAmmo(gun)
+                    if invAmmo == 0 then
+                        local ammoKey = "[" .. gun:sub(2, -2) .. " Ammo]"
+                        if ShopTable[ammoKey] then
+                            table.insert(buyQueue, { type = "ammo", gun = gun, ammoKey = ammoKey })
+                        end
+                    end
+                end
+            end
+            if AutoBuyArmor and not hasArmor() and ShopTable["[Armor]"] then
+                table.insert(buyQueue, { type = "armor" })
+            end
+        end
+
+        if #buyQueue > 0 and not currentBuying then
+            currentBuying = table.remove(buyQueue, 1)
+        end
+
+        if currentBuying then
+            local shopName
+            if currentBuying.type == "gun" then
+                shopName = ShopTable[currentBuying.name].ShopName
+            elseif currentBuying.type == "ammo" then
+                shopName = ShopTable[currentBuying.ammoKey].ShopName
+            elseif currentBuying.type == "armor" then
+                shopName = ShopTable["[Armor]"].ShopName
+            end
+            local shop = workspace.Ignored and workspace.Ignored:FindFirstChild("Shop") and workspace.Ignored.Shop:FindFirstChild(shopName)
+            if shop and shop:FindFirstChild("Head") then
+                local saved = hrp.CFrame
+                hrp.CFrame = shop.Head.CFrame
+                hrp.Velocity = Vector3.zero
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                task.wait(0.1)
+                local click = shop:FindFirstChildOfClass("ClickDetector")
+                if click then
+                    fireclickdetector(click)
+                end
+                task.wait(0.5)
+                hrp.CFrame = saved
+            end
+            currentBuying = nil
+        end
+    end)
+end)
+
+MiscTab:CreateToggle({ Name = "Auto Buy", CurrentValue = false, Callback = function(v) AutoBuyEnabled = v end })
+MiscTab:CreateTextInput({ Name = "Guns (separados por comas)", Placeholder = "ej: [AK47], [AR], [Shotgun]", CurrentText = "", Callback = function(txt)
+    AutoBuyGuns = {}
+    for gun in txt:gmatch("[^,]+") do
+        local trimmed = gun:match("^%s*(.-)%s*$")
+        if trimmed ~= "" then
+            AutoBuyGuns[trimmed] = true
+        end
+    end
+end })
+MiscTab:CreateToggle({ Name = "Auto Armor", CurrentValue = false, Callback = function(v) AutoBuyArmor = v end })
+MiscTab:CreateButton({ Name = "Refresh Shops", Callback = function() buildShopTable() end })
 
 FunTab:CreateButton({ Name = "Spiderman", Callback = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/AgentScriptorUser/AgentScriptorUser/main/Da%20Strike%20web%20swing%20sound"))() end })
 FunTab:CreateButton({ Name = "Portal Gun", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/c3jQjUyx"))() end })
@@ -616,12 +960,10 @@ FunTab:CreateButton({ Name = "Sonic", Callback = function() loadstring(game:Http
 FunTab:CreateButton({ Name = "Neckgrab", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/3Hbt189D"))() end })
 FunTab:CreateButton({ Name = "Invisible", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/3Rnd9rHf"))() end })
 
-local TeleportTab = Window:CreateTab("Teleporting")
 local TeleportSection = TeleportTab:CreateSection("Location Teleports")
 local function TeleportTo(position)
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(position)
-        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Teleported", Text = "Successfully teleported to location!", Duration = 2})
     end
 end
 local GunStoreSection = TeleportTab:CreateSection("Gun Stores")
@@ -656,15 +998,11 @@ local UtilitySection = TeleportTab:CreateSection("Utility")
 TeleportTab:CreateButton({Name = "Save Current Position", Callback = function()
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         getgenv().SavedPosition = LocalPlayer.Character.HumanoidRootPart.CFrame
-        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Position Saved", Text = "Your current position has been saved!", Duration = 3})
     end
 end})
 TeleportTab:CreateButton({Name = "Load Saved Position", Callback = function()
     if getgenv().SavedPosition and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         LocalPlayer.Character.HumanoidRootPart.CFrame = getgenv().SavedPosition
-        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Position Loaded", Text = "Teleported to saved position!", Duration = 2})
-    else
-        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Error", Text = "No saved position found!", Duration = 3})
     end
 end})
 
