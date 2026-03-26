@@ -1,3 +1,5 @@
+
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local workspace = game:GetService("Workspace")
@@ -289,46 +291,34 @@ local function updateESP()
                     end
                     if highlights[targetPlayer] then highlights[targetPlayer].Enabled = false end
                 else
-                    local inRange = false
-                    local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if localRoot then
-                        local dist = (localRoot.Position - targetPlayer.Character.HumanoidRootPart.Position).Magnitude
-                        inRange = dist <= 150
+                    if not highlights[targetPlayer] or not highlights[targetPlayer].Parent then createHighlightForPlayer(targetPlayer, targetPlayer.Character) end
+                    if highlights[targetPlayer] and highlights[targetPlayer].Adornee ~= targetPlayer.Character then highlights[targetPlayer].Adornee = targetPlayer.Character end
+                    if targetPlayer.Character:FindFirstChild("Head") and not targetPlayer.Character.Head:FindFirstChild("NameTagESP") then createNameTagForPlayer(targetPlayer, targetPlayer.Character) end
+                    local isTeammate = IsTeammateGlobal(targetPlayer)
+                    local nameTag = targetPlayer.Character:FindFirstChild("Head") and targetPlayer.Character.Head:FindFirstChild("NameTagESP")
+                    if nameTag then
+                        local showName = ESPSettings.Names and not isTeammate
+                        nameTag.NameLabel.TextTransparency = showName and 0 or 1
                     end
-                    if not inRange then
-                        local nameTag = targetPlayer.Character:FindFirstChild("Head") and targetPlayer.Character.Head:FindFirstChild("NameTagESP")
-                        if nameTag then nameTag.NameLabel.TextTransparency = 1 end
-                        if highlights[targetPlayer] then highlights[targetPlayer].Enabled = false end
-                    else
-                        if not highlights[targetPlayer] or not highlights[targetPlayer].Parent then createHighlightForPlayer(targetPlayer, targetPlayer.Character) end
-                        if highlights[targetPlayer] and highlights[targetPlayer].Adornee ~= targetPlayer.Character then highlights[targetPlayer].Adornee = targetPlayer.Character end
-                        if targetPlayer.Character:FindFirstChild("Head") and not targetPlayer.Character.Head:FindFirstChild("NameTagESP") then createNameTagForPlayer(targetPlayer, targetPlayer.Character) end
-                        local isTeammate = IsTeammateGlobal(targetPlayer)
-                        local nameTag = targetPlayer.Character:FindFirstChild("Head") and targetPlayer.Character.Head:FindFirstChild("NameTagESP")
-                        if nameTag then
-                            local showName = ESPSettings.Names and not isTeammate
-                            nameTag.NameLabel.TextTransparency = showName and 0 or 1
+                    pcall(function()
+                        local shouldHighlight = false
+                        local useColor = ESPSettings.Highlights.Color
+                        if isTeammate then
+                            if ESPSettings.Highlights.TeammatesEnabled then shouldHighlight = true; useColor = ESPSettings.Highlights.TeammatesColor end
+                        else
+                            if ESPSettings.Highlights.Enabled then shouldHighlight = true; useColor = ESPSettings.Highlights.Color end
                         end
-                        pcall(function()
-                            local shouldHighlight = false
-                            local useColor = ESPSettings.Highlights.Color
-                            if isTeammate then
-                                if ESPSettings.Highlights.TeammatesEnabled then shouldHighlight = true; useColor = ESPSettings.Highlights.TeammatesColor end
+                        if highlights[targetPlayer] then
+                            if shouldHighlight then
+                                highlights[targetPlayer].Enabled = true
+                                highlights[targetPlayer].FillColor = useColor
+                                highlights[targetPlayer].FillTransparency = ESPSettings.Highlights.Transparency
+                                highlights[targetPlayer].OutlineColor = useColor
                             else
-                                if ESPSettings.Highlights.Enabled then shouldHighlight = true; useColor = ESPSettings.Highlights.Color end
+                                highlights[targetPlayer].Enabled = false
                             end
-                            if highlights[targetPlayer] then
-                                if shouldHighlight then
-                                    highlights[targetPlayer].Enabled = true
-                                    highlights[targetPlayer].FillColor = useColor
-                                    highlights[targetPlayer].FillTransparency = ESPSettings.Highlights.Transparency
-                                    highlights[targetPlayer].OutlineColor = useColor
-                                else
-                                    highlights[targetPlayer].Enabled = false
-                                end
-                            end
-                        end)
-                    end
+                        end
+                    end)
                 end
             else
                 if highlights[targetPlayer] then highlights[targetPlayer]:Destroy(); highlights[targetPlayer] = nil end
@@ -627,6 +617,58 @@ FunTab:CreateButton({ Name = "Buy Sledgehammer", Callback = function() loadstrin
 FunTab:CreateButton({ Name = "Sonic", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/GjCuV5D5"))() end })
 FunTab:CreateButton({ Name = "Neckgrab", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/3Hbt189D"))() end })
 FunTab:CreateButton({ Name = "Invisible", Callback = function() loadstring(game:HttpGet("https://pastebin.com/raw/3Rnd9rHf"))() end })
+
+local TeleportTab = Window:CreateTab("Teleporting")
+local TeleportSection = TeleportTab:CreateSection("Location Teleports")
+local function TeleportTo(position)
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(position)
+        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Teleported", Text = "Successfully teleported to location!", Duration = 2})
+    end
+end
+local GunStoreSection = TeleportTab:CreateSection("Gun Stores")
+TeleportTab:CreateButton({Name = "Gun Store 1 (Main)", Callback = function() TeleportTo(Vector3.new(-582, 8, -736)) end})
+TeleportTab:CreateButton({Name = "Gun Store 2 (Hood)", Callback = function() TeleportTo(Vector3.new(481, 48, -621)) end})
+local BankSection = TeleportTab:CreateSection("Banks")
+TeleportTab:CreateButton({Name = "Bank", Callback = function() TeleportTo(Vector3.new(-419, 21, -282)) end})
+TeleportTab:CreateButton({Name = "Bank Top", Callback = function() TeleportTo(Vector3.new(-419, 45, -282)) end})
+local StoreSection = TeleportTab:CreateSection("Stores & Buildings")
+TeleportTab:CreateButton({Name = "Fire Department", Callback = function() TeleportTo(Vector3.new(-1063, 21, -237)) end})
+TeleportTab:CreateButton({Name = "Police Station", Callback = function() TeleportTo(Vector3.new(-267, 21, -113)) end})
+TeleportTab:CreateButton({Name = "School", Callback = function() TeleportTo(Vector3.new(-656, 22, 257)) end})
+TeleportTab:CreateButton({Name = "Prison", Callback = function() TeleportTo(Vector3.new(-920, 93, 2061)) end})
+TeleportTab:CreateButton({Name = "Hospital", Callback = function() TeleportTo(Vector3.new(102, 23, -484)) end})
+TeleportTab:CreateButton({Name = "Clothing Store", Callback = function() TeleportTo(Vector3.new(-238, 22, -339)) end})
+TeleportTab:CreateButton({Name = "UFO", Callback = function() TeleportTo(Vector3.new(-1, 140, 1911)) end})
+local ApartmentSection = TeleportTab:CreateSection("Apartments")
+TeleportTab:CreateButton({Name = "Apartment 1", Callback = function() TeleportTo(Vector3.new(-111, 22, -296)) end})
+TeleportTab:CreateButton({Name = "Apartment 2", Callback = function() TeleportTo(Vector3.new(-77, 56, -307)) end})
+local PopularSection = TeleportTab:CreateSection("Popular Areas")
+TeleportTab:CreateButton({Name = "Park", Callback = function() TeleportTo(Vector3.new(-268, 22, 84)) end})
+TeleportTab:CreateButton({Name = "Gas Station", Callback = function() TeleportTo(Vector3.new(-527, 18, -143)) end})
+TeleportTab:CreateButton({Name = "Pool", Callback = function() TeleportTo(Vector3.new(-803, 22, 254)) end})
+TeleportTab:CreateButton({Name = "Tacos Shop", Callback = function() TeleportTo(Vector3.new(-513, 21, -237)) end})
+TeleportTab:CreateButton({Name = "Barbershop", Callback = function() TeleportTo(Vector3.new(-828, 21, -97)) end})
+TeleportTab:CreateButton({Name = "Mask Store", Callback = function() TeleportTo(Vector3.new(-648, 21, -890)) end})
+local SecretSection = TeleportTab:CreateSection("Secret Spots")
+TeleportTab:CreateButton({Name = "Sewers", Callback = function() TeleportTo(Vector3.new(113, -27, -277)) end})
+TeleportTab:CreateButton({Name = "Train Tunnel", Callback = function() TeleportTo(Vector3.new(-500, 21, 180)) end})
+TeleportTab:CreateButton({Name = "High Rooftop", Callback = function() TeleportTo(Vector3.new(-340, 80, -260)) end})
+local UtilitySection = TeleportTab:CreateSection("Utility")
+TeleportTab:CreateButton({Name = "Save Current Position", Callback = function()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        getgenv().SavedPosition = LocalPlayer.Character.HumanoidRootPart.CFrame
+        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Position Saved", Text = "Your current position has been saved!", Duration = 3})
+    end
+end})
+TeleportTab:CreateButton({Name = "Load Saved Position", Callback = function()
+    if getgenv().SavedPosition and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame = getgenv().SavedPosition
+        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Position Loaded", Text = "Teleported to saved position!", Duration = 2})
+    else
+        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Error", Text = "No saved position found!", Duration = 3})
+    end
+end})
 
 refreshAimbotPlayers()
 refreshESPPlayers()
