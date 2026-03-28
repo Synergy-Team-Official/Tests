@@ -246,7 +246,7 @@ local function createMainWindow()
     local InfoTab = Window:CreateTab("Info")
     local AutoFarmTab = Window:CreateTab("AutoFarm")
     local AimbotTab = Window:CreateTab("Aimbot")
-    local HitboxTab = Window:CreateTab("Hitbox Expansion")
+    local HitboxTab = Window:CreateTab("Hitbox")
     local VisualTab = Window:CreateTab("Visual")
     local WeaponsTab = Window:CreateTab("Weapon Mods")
     local PlayerTab = Window:CreateTab("Player")
@@ -580,7 +580,7 @@ local function createMainWindow()
     end
 
     HitboxTab:CreateToggle({
-        Name = "Expanded Hitbox",
+        Name = "Hitbox",
         Flag = "HitboxEnabled",
         CurrentValue = false,
         Callback = function(v)
