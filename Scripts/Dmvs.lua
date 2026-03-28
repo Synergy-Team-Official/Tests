@@ -11,18 +11,6 @@ local Debris = game:GetService("Debris")
 local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
-local whitelistedNames = {"DONATE100YT", "eyedsee", "01_Yxn", "70xyr", "mauri1492", "cabada2007", "sparro61"}
-local isWhitelisted = false
-for _, name in ipairs(whitelistedNames) do
-    if LocalPlayer.Name == name then
-        isWhitelisted = true
-        break
-    end
-end
-if not isWhitelisted then
-    return
-end
-
 task.spawn(function()
     local function playSound(id)
         local sound = Instance.new("Sound")
