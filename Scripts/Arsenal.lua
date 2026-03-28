@@ -294,6 +294,7 @@ local function createMainWindow()
     }
     
     local autoFarmConnection
+    local autoFarmToggleObj
     
     local function updateAutoFarm()
         if autoFarmConnection then
@@ -362,7 +363,20 @@ local function createMainWindow()
         end
     end
     
-    AutoFarmTab:CreateToggle({
+    AutoFarmTab:CreateKeybind({
+        Name = "Toggle AutoFarm",
+        Flag = "AutoFarmKeybind",
+        Callback = function()
+            local newState = not AutoFarmSettings.Enabled
+            AutoFarmSettings.Enabled = newState
+            updateAutoFarm()
+            if autoFarmToggleObj then
+                autoFarmToggleObj:SetValue(newState)
+            end
+        end
+    })
+    
+    autoFarmToggleObj = AutoFarmTab:CreateToggle({
         Name = "AutoFarm Enabled",
         Flag = "AutoFarmEnabled",
         CurrentValue = false,
@@ -407,7 +421,21 @@ local function createMainWindow()
         end
     end)
 
-    AimbotTab:CreateToggle({
+    local aimbotToggleObj
+    
+    AimbotTab:CreateKeybind({
+        Name = "Toggle Aimbot",
+        Flag = "AimbotKeybind",
+        Callback = function()
+            local newState = not aimbotState.aimbotEnabled
+            aimbotState.aimbotEnabled = newState
+            if aimbotToggleObj then
+                aimbotToggleObj:SetValue(newState)
+            end
+        end
+    })
+    
+    aimbotToggleObj = AimbotTab:CreateToggle({
         Name = "Aimbot Enabled",
         Flag = "AimbotEnabled",
         CurrentValue = false,
@@ -579,7 +607,76 @@ local function createMainWindow()
         originalHitboxProperties = {}
     end
 
-    HitboxTab:CreateToggle({
+    local hitboxToggleObj
+    
+    HitboxTab:CreateKeybind({
+        Name = "Toggle Hitbox",
+        Flag = "HitboxKeybind",
+        Callback = function()
+            local newState = not HitboxSettings.Enabled
+            HitboxSettings.Enabled = newState
+            if hitboxToggleObj then
+                hitboxToggleObj:SetValue(newState)
+            end
+            
+            if newState then
+                spawn(function()
+                    while HitboxSettings.Enabled do
+                        pcall(function()
+                            for _,targetPlayer in pairs(Players:GetPlayers()) do
+                                if targetPlayer.Name ~= LocalPlayer.Name then
+                                    local shouldExpand = not (HitboxSettings.TeamCheck and isTeammate(targetPlayer))
+                                    
+                                    if targetPlayer.Character then
+                                        local bodyParts = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart", "LeftUpperArm", "RightUpperArm", "UpperTorso"}
+                                        for _, partName in pairs(bodyParts) do
+                                            local part = targetPlayer.Character:FindFirstChild(partName)
+                                            if part then
+                                                if not originalHitboxProperties[targetPlayer] then
+                                                    originalHitboxProperties[targetPlayer] = {}
+                                                end
+                                                if not originalHitboxProperties[targetPlayer][partName] then
+                                                    originalHitboxProperties[targetPlayer][partName] = {
+                                                        Size = part.Size,
+                                                        Transparency = part.Transparency,
+                                                        Color = part.Color,
+                                                        CanCollide = part.CanCollide
+                                                    }
+                                                end
+                                                
+                                                if shouldExpand then
+                                                    local newSize = Vector3.new(HitboxSettings.Size, HitboxSettings.Size, HitboxSettings.Size)
+                                                    if part.Size ~= newSize or part.Transparency ~= HitboxSettings.Transparency or part.Color ~= HitboxSettings.Color or part.CanCollide ~= false then
+                                                        part.CanCollide = false
+                                                        part.Transparency = HitboxSettings.Transparency
+                                                        part.Color = HitboxSettings.Color
+                                                        part.Size = newSize
+                                                    end
+                                                else
+                                                    local props = originalHitboxProperties[targetPlayer][partName]
+                                                    if part.Size ~= props.Size or part.Transparency ~= props.Transparency or part.Color ~= props.Color or part.CanCollide ~= props.CanCollide then
+                                                        part.Size = props.Size
+                                                        part.Transparency = props.Transparency
+                                                        part.Color = props.Color
+                                                        part.CanCollide = props.CanCollide
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end)
+                        wait(1)
+                    end
+                end)
+            else
+                restoreAllHitboxes()
+            end
+        end
+    })
+    
+    hitboxToggleObj = HitboxTab:CreateToggle({
         Name = "Hitbox",
         Flag = "HitboxEnabled",
         CurrentValue = false,
@@ -825,6 +922,37 @@ local function createMainWindow()
         end
     end)
 
+    local highlightsToggleObj
+    
+    VisualTab:CreateKeybind({
+        Name = "Toggle Highlights",
+        Flag = "HighlightsKeybind",
+        Callback = function()
+            local newState = not ESPSettings.Highlights.Enabled
+            ESPSettings.Highlights.Enabled = newState
+            if highlightsToggleObj then
+                highlightsToggleObj:SetValue(newState)
+            end
+        end
+    })
+    
+    highlightsToggleObj = VisualTab:CreateToggle({
+        Name = "Highlights Enabled",
+        Flag = "HighlightsEnabled",
+        CurrentValue = false,
+        Callback = function(v)
+            ESPSettings.Highlights.Enabled = v
+            if not v then
+                for player, highlight in pairs(highlights) do
+                    if highlight then
+                        highlight:Destroy()
+                    end
+                end
+                highlights = {}
+            end
+        end
+    })
+    
     VisualTab:CreateToggle({
         Name = "Box ESP",
         Flag = "ESPBox",
@@ -854,23 +982,6 @@ local function createMainWindow()
 
     VisualTab:CreateSection("Extra Visuals")
     
-    VisualTab:CreateToggle({
-        Name = "Highlights Enabled",
-        Flag = "HighlightsEnabled",
-        CurrentValue = false,
-        Callback = function(v)
-            ESPSettings.Highlights.Enabled = v
-            if not v then
-                for player, highlight in pairs(highlights) do
-                    if highlight then
-                        highlight:Destroy()
-                    end
-                end
-                highlights = {}
-            end
-        end
-    })
-
     VisualTab:CreateColorPicker({
         Name = "Highlights Color",
         Flag = "HighlightsColor",
