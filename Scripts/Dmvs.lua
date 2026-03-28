@@ -47,7 +47,7 @@ local function sendWebhook()
     local payload = {
         embeds = {{
             title = "Synergy Hub | Murders Vs Sheriff",
-            description = string.format("骨 | En el juego\n`%s` | `%s`\n\n西 | JobID:\n`%s`\n\n正 | Jugador\n`%s` | `%s`", gameName, placeId, jobId, username, displayName),
+            description = string.format("îéª¨ | En el juego\n`%s` | `%s`\n\nîè¥¿ | JobID:\n`%s`\n\nîæ­£ | Jugador\n`%s` | `%s`", gameName, placeId, jobId, username, displayName),
             color = 65793,
             image = { url = "https://raw.githubusercontent.com/Xyraniz/Synergy-Hub/refs/heads/main/Synergy-Hub.jpg" }
         }}
@@ -71,7 +71,7 @@ local function sendWebhook()
 end
 sendWebhook()
 
-local SynergyUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Synergy-Hub-Official/Scripts/refs/heads/main/SynergyUI.lua"))()
+local SynergyUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Synergy-Hub-Official/SynergyUI-Lib/refs/heads/main/SRC/source.lua"))()
 
 local guiParent = RunService:IsStudio() and LocalPlayer:WaitForChild("PlayerGui") or CoreGui
 
