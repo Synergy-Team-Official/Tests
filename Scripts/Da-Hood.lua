@@ -1230,6 +1230,208 @@ TeleportTab:CreateButton({Name = "Load Saved Position", Callback = function()
     end
 end})
 
+local TargetTab = Window:CreateTab("Target")
+local targetSelectedPlayer = nil
+local targetPlayerDropdown = nil
+local function refreshTargetPlayers()
+    local playerList = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(playerList, player.Name)
+        end
+    end
+    if targetPlayerDropdown then
+        targetPlayerDropdown:SetOptions(playerList)
+        if not targetSelectedPlayer or not targetSelectedPlayer.Parent then
+            targetPlayerDropdown:SetValue("")
+            targetSelectedPlayer = nil
+        end
+    end
+end
+targetPlayerDropdown = TargetTab:CreateDropdown({
+    Name = "Select Player",
+    Options = {},
+    CurrentOption = "",
+    Callback = function(v)
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Name == v then
+                targetSelectedPlayer = player
+                break
+            end
+        end
+    end
+})
+TargetTab:CreateButton({ Name = "Refresh Players", Callback = function() refreshTargetPlayers() end })
+
+local cameraFollowActive = false
+local camYaw = 0
+local camPitch = 30
+local camDist = 10
+local lastMousePos = nil
+local cameraConnection = nil
+
+local function startCameraFollow()
+    if cameraConnection then cameraConnection:Disconnect() end
+    cameraConnection = RunService.RenderStepped:Connect(function()
+        if not cameraFollowActive then return end
+        if targetSelectedPlayer and targetSelectedPlayer.Character and targetSelectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local targetRoot = targetSelectedPlayer.Character.HumanoidRootPart
+            local targetPos = targetRoot.Position
+            local yawRad = math.rad(camYaw)
+            local pitchRad = math.rad(camPitch)
+            local offset = Vector3.new(math.sin(yawRad) * math.cos(pitchRad), math.sin(pitchRad), math.cos(yawRad) * math.cos(pitchRad)) * camDist
+            local camCF = CFrame.new(targetPos + offset, targetPos)
+            workspace.CurrentCamera.CFrame = camCF
+        end
+    end)
+end
+
+local function stopCameraFollow()
+    if cameraConnection then
+        cameraConnection:Disconnect()
+        cameraConnection = nil
+    end
+end
+
+UserInputService.InputChanged:Connect(function(input, gameProcessed)
+    if not cameraFollowActive then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Delta
+        camYaw = camYaw - delta.X * 0.5
+        camPitch = math.clamp(camPitch - delta.Y * 0.5, 10, 80)
+    elseif input.KeyCode == Enum.KeyCode.MouseWheel then
+        camDist = math.clamp(camDist - input.Position.Z * 0.5, 2, 30)
+    end
+end)
+
+TargetTab:CreateToggle({
+    Name = "View",
+    CurrentValue = false,
+    Callback = function(v)
+        cameraFollowActive = v
+        if v then
+            startCameraFollow()
+        else
+            stopCameraFollow()
+        end
+    end
+})
+
+TargetTab:CreateButton({
+    Name = "Goto",
+    Callback = function()
+        if not targetSelectedPlayer then return end
+        local char = targetSelectedPlayer.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            local targetPos = char.HumanoidRootPart.Position
+            local localChar = LocalPlayer.Character
+            if localChar and localChar:FindFirstChild("HumanoidRootPart") then
+                localChar.HumanoidRootPart.CFrame = CFrame.new(targetPos)
+            end
+        end
+    end
+})
+
+local loopGotoConnection = nil
+local loopGotoEnabled = false
+local loopGotoDistance = 5
+local function startLoopGoto()
+    if loopGotoConnection then loopGotoConnection:Disconnect() end
+    loopGotoConnection = RunService.Heartbeat:Connect(function()
+        if loopGotoEnabled and targetSelectedPlayer and targetSelectedPlayer.Character and targetSelectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local targetCF = targetSelectedPlayer.Character.HumanoidRootPart.CFrame
+            local behindPos = targetCF.Position - targetCF.LookVector * loopGotoDistance
+            local localChar = LocalPlayer.Character
+            if localChar and localChar:FindFirstChild("HumanoidRootPart") then
+                localChar.HumanoidRootPart.CFrame = CFrame.new(behindPos)
+            end
+        end
+    end)
+end
+local function stopLoopGoto()
+    if loopGotoConnection then
+        loopGotoConnection:Disconnect()
+        loopGotoConnection = nil
+    end
+end
+TargetTab:CreateToggle({
+    Name = "LoopGoto",
+    CurrentValue = false,
+    Callback = function(v)
+        loopGotoEnabled = v
+        if v then
+            startLoopGoto()
+        else
+            stopLoopGoto()
+        end
+    end
+})
+TargetTab:CreateSlider({
+    Name = "Distance",
+    Range = {1, 100},
+    Increment = 1,
+    CurrentValue = 5,
+    Callback = function(v)
+        loopGotoDistance = v
+    end
+})
+
+local flingConnection = nil
+local flingEnabled = false
+local originalCollisionStates = {}
+local function setCollision(character, state)
+    if not character then return end
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            if state == false then
+                originalCollisionStates[part] = part.CanCollide
+                part.CanCollide = false
+            else
+                if originalCollisionStates[part] ~= nil then
+                    part.CanCollide = originalCollisionStates[part]
+                end
+            end
+        end
+    end
+end
+local function startFling()
+    if flingConnection then flingConnection:Disconnect() end
+    flingConnection = RunService.Heartbeat:Connect(function()
+        if flingEnabled and targetSelectedPlayer and targetSelectedPlayer.Character then
+            local targetChar = targetSelectedPlayer.Character
+            local root = targetChar:FindFirstChild("HumanoidRootPart")
+            if root then
+                local randomVel = Vector3.new(math.random(-5000,5000), math.random(3000,8000), math.random(-5000,5000))
+                root.Velocity = randomVel
+                root.AssemblyLinearVelocity = randomVel
+                setCollision(targetChar, false)
+            end
+        end
+    end)
+end
+local function stopFling()
+    if flingConnection then
+        flingConnection:Disconnect()
+        flingConnection = nil
+    end
+    if targetSelectedPlayer and targetSelectedPlayer.Character then
+        setCollision(targetSelectedPlayer.Character, true)
+    end
+    originalCollisionStates = {}
+end
+TargetTab:CreateToggle({
+    Name = "Fling",
+    CurrentValue = false,
+    Callback = function(v)
+        flingEnabled = v
+        if v then
+            startFling()
+        else
+            stopFling()
+        end
+    end
+})
+
 local function stopAllAnimations(character)
     local humanoid = character:FindFirstChildOfClass("Humanoid") or character:FindFirstChildOfClass("AnimationController")
     if humanoid then
@@ -1502,3 +1704,4 @@ refreshAimbotPlayers()
 refreshESPPlayers()
 refreshHitboxPlayers()
 refreshKillAuraPlayers()
+refreshTargetPlayers()
