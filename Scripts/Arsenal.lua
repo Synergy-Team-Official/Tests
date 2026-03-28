@@ -239,7 +239,7 @@ local function createMainWindow()
         Author = "Xyraniz",
         ToggleKey = Enum.KeyCode.X,
         AccentColor = Color3.fromRGB(100, 70, 255),
-        ConfigFile = "synergy_hub_config.json",
+        ConfigFile = "SynergyHub_Arsenal.json",
         CloseOnEscape = false
     })
 
@@ -263,13 +263,13 @@ local function createMainWindow()
 
     InfoTab:CreateParagraph({
         Title = "Credits",
-        Content = "Xyraniz\nSynergyUI © Footagesus — GitHub"
+        Content = "Xyraniz\nSynergyTeam"
     })
 
     InfoTab:CreateButton({
         Name = "Discord Server",
         Callback = function()
-            pcall(function() setclipboard("discord.gg/nCNASmNRTE") end)
+            pcall(function() setclipboard("https://discord.gg/WgxZwefhpz") end)
             SynergyUI:Notify("Invite copied", 2, Color3.fromRGB(0, 170, 255), "TopRight")
         end,
         Tooltip = "Copy invite"
