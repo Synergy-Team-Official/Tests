@@ -318,12 +318,11 @@ local AimbotTab = Window:CreateTab("Aimbot")
 local HitboxTab = Window:CreateTab("Hitbox")
 local VisualTab = Window:CreateTab("ESP")
 
-InfoTab:CreateLabel("What is Synergy Hub?")
-InfoTab:CreateLabel("A Roblox script hub optimized for gameplay. Designed to dominate in games.")
-InfoTab:CreateLabel("")
-InfoTab:CreateLabel("Credits")
-InfoTab:CreateLabel("Xyraniz\nSynergy Team\nCustom UI Port")
-InfoTab:CreateButton({ Name = "Discord Server", Callback = function() setclipboard("discord.gg/nCNASmNRTE") end })
+InfoTab:CreateSection("Information")
+InfoTab:CreateParagraph({Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in games."})
+InfoTab:CreateParagraph({Title = "Credits", Content = "Xyraniz\nSynergy Team"})
+InfoTab:CreateButton({Name = "Discord Server", Callback = function() setclipboard("discord.gg/nCNASmNRTE") end})
+InfoTab:CreateKeybind({Name = "Menu Keybind", CurrentKeybind = "X", Flag = "MenuKeybind", Callback = function(key) Window:Toggle() end})
 
 local menuVisible = true
 InfoTab:CreateKeybind({
