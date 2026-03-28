@@ -1582,7 +1582,7 @@ local function mainLoop()
 end
 
 local window = SynergyUI:CreateWindow({
-    Title = "Synergy Hub",
+    Title = "Synergy Hub - Dmvs",
     ToggleKey = Enum.KeyCode.X,
     ConfigFile = "SynergyHubConfig.json"
 })
