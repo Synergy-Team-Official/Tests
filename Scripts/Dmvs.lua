@@ -1922,5 +1922,3 @@ aimbotConnection = RunService.RenderStepped:Connect(function()
     autoShootFOVCircle.Radius = autoShootConfig.fovSize
     autoShootFOVCircle.Color = autoShootConfig.fovColor
 end)
-
-InfoTab:Select()
