@@ -236,7 +236,7 @@ end
 local function createMainWindow()
     local Window = SynergyUI:CreateWindow({
         Title = "Synergy Hub - Arsenal",
-        Author = "Xyraniz",
+        Author = "Xyraniz\nSynergy Team",
         ToggleKey = Enum.KeyCode.X,
         AccentColor = Color3.fromRGB(100, 70, 255),
         ConfigFile = "SynergyHub_Arsenal.json",
