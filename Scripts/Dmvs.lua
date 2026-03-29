@@ -709,16 +709,6 @@ for _, targetPlayer in pairs(Players:GetPlayers()) do if targetPlayer ~= LocalPl
 Players.PlayerAdded:Connect(function(newPlayer) if newPlayer ~= LocalPlayer then addESPToPlayer(newPlayer) end end)
 
 local function updateESP()
-    if not IsInRound() then
-        for _, targetPlayer in pairs(Players:GetPlayers()) do
-            if targetPlayer ~= LocalPlayer then
-                local nameTag = targetPlayer.Character and targetPlayer.Character:FindFirstChild("Head") and targetPlayer.Character.Head:FindFirstChild("NameTagESP")
-                if nameTag then nameTag.NameLabel.TextTransparency = 1 end
-                if highlights[targetPlayer] then highlights[targetPlayer].Enabled = false end
-            end
-        end
-        return
-    end
     for _, targetPlayer in pairs(Players:GetPlayers()) do
         if targetPlayer ~= LocalPlayer then
             if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
@@ -735,7 +725,7 @@ local function updateESP()
                     local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                     if localRoot then
                         local dist = (localRoot.Position - targetPlayer.Character.HumanoidRootPart.Position).Magnitude
-                        inRange = dist <= 150
+                        inRange = dist <= 250
                     end
                     if not inRange then
                         local nameTag = targetPlayer.Character:FindFirstChild("Head") and targetPlayer.Character.Head:FindFirstChild("NameTagESP")
