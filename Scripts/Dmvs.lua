@@ -607,7 +607,7 @@ local function getTargetPlayer(targetPartStr, fov, visibilityCheck)
     return selected.player
 end
 
-local function initializeAimbot()
+local initializeAimbot = function()
     if not FOVring then
         FOVring = Drawing.new("Circle")
         FOVring.Visible = false; FOVring.Thickness = 2; FOVring.Color = aimbotState.fovColor; FOVring.Filled = false; FOVring.Radius = aimbotState.fovSize; FOVring.Position = workspace.CurrentCamera.ViewportSize / 2
@@ -1326,7 +1326,9 @@ local function startSilentAimMobilePrediction()
                     end
                 else indicator.Visible = false end
             end
-        else for _, indicator in pairs(ESP_Indicators) do indicator.Visible = false end end
+        else 
+            for _, indicator in pairs(ESP_Indicators) do indicator.Visible = false end 
+        end
     end)
     table.insert(silentAimMobileConnections, renderConnection)
     table.insert(silentAimMobileConnections, Players.PlayerRemoving:Connect(function(player) RemoveESPIndicator(player.UserId) end))
@@ -1620,7 +1622,7 @@ SilentAimTab:CreateToggle({
     end
 })
 SilentAimTab:CreateToggle({ Name = "Show FOV", Flag = "SilentAimShowFOV", CurrentValue = true, Callback = function(v) silentAimSettings.showFOV = v end })
-SilentAimTab:CreateToggle({ Name = "Hide ESP Squares", Flag = "ShowESPIndicators", CurrentValue = true, Callback = function(v) showESPIndicators = v end })
+SilentAimTab:CreateToggle({ Name = "Show ESP Indicators", Flag = "ShowESPIndicators", CurrentValue = true, Callback = function(v) showESPIndicators = v end })
 SilentAimTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(255, 255, 255), Flag = "SilentAimFOVColor", Callback = function(v) silentAimSettings.fovColor = v; SilentAimFOV.Color = v end })
 SilentAimTab:CreateDropdown({
     Name = "Target Part",
@@ -1707,6 +1709,10 @@ VisualTab:CreateKeybind({
     Name = "Toggle Highlights",
     Flag = "HighlightsKeybind",
     Callback = function()
+        if window.Flags["HighlightsEnabled"] then
+            local newState = not window.Flags["HighlightsEnabled"].CurrentValue
+            window.Flags["HighlightsEnabled"]:Set(newState)
+        end
     end
 })
 VisualTab:CreateSection("ESP Visuals")
@@ -1714,8 +1720,21 @@ VisualTab:CreateToggle({ Name = "Show Names", Flag = "ESPNames", CurrentValue = 
 VisualTab:CreateToggle({
     Name = "Enable Highlights (Enemies)",
     Flag = "HighlightsEnabled",
-    CurrentValue = true,
+    CurrentValue = false,
     Callback = function(v)
+        if v then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    applyESP(p, p.Character)
+                end
+            end
+        else
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p.Character then
+                    removeESP(p.Character)
+                end
+            end
+        end
     end
 })
 VisualTab:CreateColorPicker({ Name = "Enemy Color", Color = Color3.fromRGB(0, 0, 128), Flag = "HighlightsColor", Callback = function(v) end })
@@ -1858,3 +1877,9 @@ aimbotConnection = RunService.RenderStepped:Connect(function()
     autoShootFOVCircle.Radius = autoShootConfig.fovSize
     autoShootFOVCircle.Color = autoShootConfig.fovColor
 end)
+
+for _, p in ipairs(Players:GetPlayers()) do
+    if p.Character then
+        removeESP(p.Character)
+    end
+end
