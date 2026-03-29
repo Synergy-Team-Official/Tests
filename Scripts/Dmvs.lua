@@ -638,138 +638,68 @@ local function restoreAllHitboxes()
     originalHitboxProperties = {}
 end
 
-local ESPSettings = { Names = false, Highlights = { Enabled = false, Color = Color3.fromRGB(255, 0, 0), Transparency = 0.5, TeammatesEnabled = false, TeammatesColor = Color3.fromRGB(135, 206, 235) } }
-
-local nameTagContainer = Instance.new("BillboardGui")
-local playerNameLabel = Instance.new("TextLabel")
-nameTagContainer.Name = "NameTagESP"
-nameTagContainer.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-nameTagContainer.Active = true
-nameTagContainer.AlwaysOnTop = true
-nameTagContainer.LightInfluence = 1.000
-nameTagContainer.Size = UDim2.new(0, 200, 0, 30)
-nameTagContainer.StudsOffset = Vector3.new(0, 3, 0)
-playerNameLabel.Name = "NameLabel"
-playerNameLabel.Parent = nameTagContainer
-playerNameLabel.BackgroundTransparency = 1
-playerNameLabel.BorderSizePixel = 0
-playerNameLabel.Size = UDim2.new(1, 0, 1, 0)
-playerNameLabel.Font = Enum.Font.GothamBold
-playerNameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-playerNameLabel.TextSize = 14
-playerNameLabel.TextStrokeTransparency = 0.5
-playerNameLabel.TextWrapped = true
-playerNameLabel.TextTransparency = 1
-
-local highlights = {}
-local HighlightStorage = Instance.new("Folder")
-HighlightStorage.Name = "Synergy_Visuals"
-local protectedGui = game:GetService("CoreGui")
-if not (function() HighlightStorage.Parent = protectedGui end) then
-    HighlightStorage.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end
-
-local function createHighlightForPlayer(targetPlayer, character)
-    if not character then return end
-    if highlights[targetPlayer] then
-        if highlights[targetPlayer].Parent == nil then highlights[targetPlayer]:Destroy(); highlights[targetPlayer] = nil else return end
-    end
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "ESP_Highlight"
-    highlight.Adornee = character
-    highlight.Enabled = false
-    highlight.Parent = HighlightStorage
-    highlights[targetPlayer] = highlight
-end
-
-local function createNameTagForPlayer(targetPlayer, character)
-    if not character then return end
-    local head = character:WaitForChild("Head", 10)
-    if head then
-        if head:FindFirstChild("NameTagESP") then return end
-        local nameClone = nameTagContainer:Clone()
-        nameClone.Parent = head
-        nameClone:FindFirstChild("NameLabel").Text = targetPlayer.Name
+local function removeESP(char)
+    local esp = char:FindFirstChild("ESP")
+    if esp then
+        esp:Destroy()
     end
 end
 
-local function addESPToPlayer(targetPlayer)
-    targetPlayer.CharacterAdded:Connect(function(newCharacter)
-        repeat task.wait() until newCharacter:FindFirstChild("HumanoidRootPart")
-        createHighlightForPlayer(targetPlayer, newCharacter)
-        createNameTagForPlayer(targetPlayer, newCharacter)
+local function applyESP(p, char)
+    local myTeam = LocalPlayer:GetAttribute("Team")
+    local enemyTeam = p:GetAttribute("Team")
+
+    if p ~= LocalPlayer
+    and myTeam ~= nil
+    and enemyTeam ~= nil
+    and enemyTeam ~= myTeam then
+        
+        if char:FindFirstChild("ESP") then return end
+        
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "ESP"
+        highlight.FillColor = Color3.fromRGB(0, 0, 128)
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.Adornee = char
+        highlight.Parent = char
+    else
+        removeESP(char)
+    end
+end
+
+local function updatePlayer(p)
+    if p.Character then
+        applyESP(p, p.Character)
+    end
+end
+
+local function setupPlayer(p)
+    if p == LocalPlayer then return end
+
+    p.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        applyESP(p, char)
     end)
-    if targetPlayer.Character then
-        createHighlightForPlayer(targetPlayer, targetPlayer.Character)
-        createNameTagForPlayer(targetPlayer, targetPlayer.Character)
+
+    p:GetAttributeChangedSignal("Team"):Connect(function()
+        updatePlayer(p)
+    end)
+
+    LocalPlayer:GetAttributeChangedSignal("Team"):Connect(function()
+        updatePlayer(p)
+    end)
+
+    if p.Character then
+        applyESP(p, p.Character)
     end
 end
 
-for _, targetPlayer in pairs(Players:GetPlayers()) do if targetPlayer ~= LocalPlayer then addESPToPlayer(targetPlayer) end end
-Players.PlayerAdded:Connect(function(newPlayer) if newPlayer ~= LocalPlayer then addESPToPlayer(newPlayer) end end)
-
-local function updateESP()
-    for _, targetPlayer in pairs(Players:GetPlayers()) do
-        if targetPlayer ~= LocalPlayer then
-            if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-                if humanoid and humanoid.Health <= 0 then
-                    local head = targetPlayer.Character:FindFirstChild("Head")
-                    if head then
-                        local nameTag = head:FindFirstChild("NameTagESP")
-                        if nameTag then nameTag:Destroy() end
-                    end
-                    if highlights[targetPlayer] then highlights[targetPlayer].Enabled = false end
-                else
-                    local inRange = false
-                    local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if localRoot then
-                        local dist = (localRoot.Position - targetPlayer.Character.HumanoidRootPart.Position).Magnitude
-                        inRange = dist <= 250
-                    end
-                    if not inRange then
-                        local nameTag = targetPlayer.Character:FindFirstChild("Head") and targetPlayer.Character.Head:FindFirstChild("NameTagESP")
-                        if nameTag then nameTag.NameLabel.TextTransparency = 1 end
-                        if highlights[targetPlayer] then highlights[targetPlayer].Enabled = false end
-                    else
-                        if not highlights[targetPlayer] or not highlights[targetPlayer].Parent then createHighlightForPlayer(targetPlayer, targetPlayer.Character) end
-                        if highlights[targetPlayer] and highlights[targetPlayer].Adornee ~= targetPlayer.Character then highlights[targetPlayer].Adornee = targetPlayer.Character end
-                        if targetPlayer.Character:FindFirstChild("Head") and not targetPlayer.Character.Head:FindFirstChild("NameTagESP") then createNameTagForPlayer(targetPlayer, targetPlayer.Character) end
-                        local isTeammate = IsTeammateGlobal(targetPlayer)
-                        local nameTag = targetPlayer.Character:FindFirstChild("Head") and targetPlayer.Character.Head:FindFirstChild("NameTagESP")
-                        if nameTag then
-                            local showName = ESPSettings.Names and not isTeammate
-                            nameTag.NameLabel.TextTransparency = showName and 0 or 1
-                        end
-                        local shouldHighlight = false
-                        local useColor = ESPSettings.Highlights.Color
-                        if isTeammate then
-                            if ESPSettings.Highlights.TeammatesEnabled then shouldHighlight = true; useColor = ESPSettings.Highlights.TeammatesColor end
-                        else
-                            if ESPSettings.Highlights.Enabled then shouldHighlight = true; useColor = ESPSettings.Highlights.Color end
-                        end
-                        if highlights[targetPlayer] then
-                            if shouldHighlight then
-                                highlights[targetPlayer].Enabled = true
-                                highlights[targetPlayer].FillColor = useColor
-                                highlights[targetPlayer].FillTransparency = ESPSettings.Highlights.Transparency
-                                highlights[targetPlayer].OutlineColor = useColor
-                            else
-                                highlights[targetPlayer].Enabled = false
-                            end
-                        end
-                    end
-                end
-            else
-                if highlights[targetPlayer] then highlights[targetPlayer]:Destroy(); highlights[targetPlayer] = nil end
-            end
-        end
-    end
+for _, p in ipairs(Players:GetPlayers()) do
+    setupPlayer(p)
 end
-
-Players.PlayerRemoving:Connect(function(player) if highlights[player] then highlights[player]:Destroy(); highlights[player] = nil end end)
-local espUpdateInterval = 0.1; local lastUpdate = tick()
-RunService.RenderStepped:Connect(function() local now = tick(); if now - lastUpdate >= espUpdateInterval then updateESP(); lastUpdate = now end end)
+Players.PlayerAdded:Connect(setupPlayer)
 
 local autoFarmEnabled = false; local autoFarmHeartbeatConnection; local autoFarmEquipConnection; local activeTPTarget = nil; local tpLoopConnection = nil
 
@@ -1777,58 +1707,18 @@ VisualTab:CreateKeybind({
     Name = "Toggle Highlights",
     Flag = "HighlightsKeybind",
     Callback = function()
-        local newState = not ESPSettings.Highlights.Enabled
-        ESPSettings.Highlights.Enabled = newState
-        ESPSettings.Highlights.TeammatesEnabled = newState
-        if window.Flags["HighlightsEnabled"] then window.Flags["HighlightsEnabled"]:Set(newState) end
-        if window.Flags["TeammatesESPEnabled"] then window.Flags["TeammatesESPEnabled"]:Set(newState) end
-        updateESP()
     end
 })
 VisualTab:CreateSection("ESP Visuals")
-VisualTab:CreateToggle({ Name = "Show Names", Flag = "ESPNames", CurrentValue = false, Callback = function(v) ESPSettings.Names = v end })
+VisualTab:CreateToggle({ Name = "Show Names", Flag = "ESPNames", CurrentValue = false, Callback = function(v) end })
 VisualTab:CreateToggle({
     Name = "Enable Highlights (Enemies)",
     Flag = "HighlightsEnabled",
-    CurrentValue = false,
+    CurrentValue = true,
     Callback = function(v)
-        ESPSettings.Highlights.Enabled = v
-        if not v and not ESPSettings.Highlights.TeammatesEnabled then
-            for player, highlight in pairs(highlights) do if highlight then highlight:Destroy() end end
-            highlights = {}
-        else
-            for _, targetPlayer in pairs(Players:GetPlayers()) do
-                if targetPlayer ~= LocalPlayer and targetPlayer.Character then
-                    createHighlightForPlayer(targetPlayer, targetPlayer.Character)
-                end
-            end
-        end
-        updateESP()
     end
 })
-VisualTab:CreateColorPicker({ Name = "Enemy Color", Color = Color3.fromRGB(255, 0, 0), Flag = "HighlightsColor", Callback = function(v) ESPSettings.Highlights.Color = v end })
-VisualTab:CreateSlider({ Name = "Fill Transparency", Range = {0, 1}, Increment = 0.1, CurrentValue = 0.5, Flag = "HighlightsTransparency", Callback = function(v) ESPSettings.Highlights.Transparency = v end })
-VisualTab:CreateSection("Teammates")
-VisualTab:CreateToggle({
-    Name = "Enable ESP Teammates",
-    Flag = "TeammatesESPEnabled",
-    CurrentValue = false,
-    Callback = function(v)
-        ESPSettings.Highlights.TeammatesEnabled = v
-        if not v and not ESPSettings.Highlights.Enabled then
-            for player, highlight in pairs(highlights) do if highlight then highlight:Destroy() end end
-            highlights = {}
-        else
-            for _, targetPlayer in pairs(Players:GetPlayers()) do
-                if targetPlayer ~= LocalPlayer and targetPlayer.Character then
-                    createHighlightForPlayer(targetPlayer, targetPlayer.Character)
-                end
-            end
-        end
-        updateESP()
-    end
-})
-VisualTab:CreateColorPicker({ Name = "Teammates Color", Color = Color3.fromRGB(135, 206, 235), Flag = "TeammatesColor", Callback = function(v) ESPSettings.Highlights.TeammatesColor = v end })
+VisualTab:CreateColorPicker({ Name = "Enemy Color", Color = Color3.fromRGB(0, 0, 128), Flag = "HighlightsColor", Callback = function(v) end })
 
 TPTab:CreateSection("Teleports & Farm")
 TPTab:CreateToggle({ Name = "Auto Farm Wins", Flag = "AutoFarm", CurrentValue = false, Callback = function(v) autoFarmEnabled = v; if v then startAutoFarm() else stopAutoFarm() end end })
