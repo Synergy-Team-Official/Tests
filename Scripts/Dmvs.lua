@@ -1584,9 +1584,9 @@ local TPTab = window:CreateTab("TPs")
 local ExtraTab = window:CreateTab("Extra")
 
 InfoTab:CreateSection("Information")
-InfoTab:CreateParagraph({ Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in games." })
-InfoTab:CreateParagraph({ Title = "Credits", Content = "Xyraniz\nSynergy Team" })
-InfoTab:CreateButton({ Name = "Discord Server", Callback = function() setclipboard("https://discord.gg/WgxZwefhpz") end })
+InfoTab:CreateParagraph({Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in games."})
+InfoTab:CreateParagraph({Title = "Credits", Content = "Xyraniz\nSynergy Team"})
+InfoTab:CreateButton({Name = "Discord Server", Callback = function() setclipboard("https://discord.gg/WgxZwefhpz") end})
 
 InfoTab:CreateKeybind({
     Name = "Menu Keybind",
