@@ -1572,7 +1572,7 @@ end
 local window = SynergyUI:CreateWindow({
     Title = "Synergy Hub - Dmvs",
     ToggleKey = Enum.KeyCode.X,
-    ConfigFile = "SynergyHubConfig.json"
+    ConfigFile = "SynergyHub_Dmvs.json"
 })
 
 local InfoTab = window:CreateTab("Information")
@@ -1584,9 +1584,9 @@ local TPTab = window:CreateTab("TPs")
 local ExtraTab = window:CreateTab("Extra")
 
 InfoTab:CreateSection("Information")
-InfoTab:CreateParagraph({ Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in Murders vs Sheriff." })
-InfoTab:CreateParagraph({ Title = "Credits", Content = "Xyraniz\nSynergy Team\nCustom UI Port" })
-InfoTab:CreateButton({ Name = "Discord Server", Callback = function() setclipboard("discord.gg/nCNASmNRTE") end })
+InfoTab:CreateParagraph({ Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in games." })
+InfoTab:CreateParagraph({ Title = "Credits", Content = "Xyraniz\nSynergy Team" })
+InfoTab:CreateButton({ Name = "Discord Server", Callback = function() setclipboard("https://discord.gg/WgxZwefhpz") end })
 
 InfoTab:CreateKeybind({
     Name = "Menu Keybind",
@@ -1640,6 +1640,9 @@ SilentAimTab:CreateKeybind({
             stopSilentAimMobilePrediction()
         end
         SetSilentAimState(newV)
+        if window.Flags["SilentAimNoFailEnabled"] then
+            window.Flags["SilentAimNoFailEnabled"]:Set(newV)
+        end
     end
 })
 SilentAimTab:CreateKeybind({
@@ -1650,6 +1653,45 @@ SilentAimTab:CreateKeybind({
         if newV then
             if silentAimNoFailEnabled then
                 SetSilentAimState(false)
+                if window.Flags["SilentAimNoFailEnabled"] then
+                    window.Flags["SilentAimNoFailEnabled"]:Set(false)
+                end
+            end
+            startSilentAimMobilePrediction()
+        else
+            stopSilentAimMobilePrediction()
+        end
+        if window.Flags["SilentAimMobilePrediction"] then
+            window.Flags["SilentAimMobilePrediction"]:Set(newV)
+        end
+    end
+})
+SilentAimTab:CreateSection("Silent Aim Settings")
+SilentAimTab:CreateToggle({
+    Name = "Silent Aim (No Fail)",
+    Flag = "SilentAimNoFailEnabled",
+    CurrentValue = false,
+    Callback = function(v)
+        if v and silentAimMobilePredictionEnabled then
+            stopSilentAimMobilePrediction()
+            if window.Flags["SilentAimMobilePrediction"] then
+                window.Flags["SilentAimMobilePrediction"]:Set(false)
+            end
+        end
+        SetSilentAimState(v)
+    end
+})
+SilentAimTab:CreateToggle({
+    Name = "Silent Aim (Mobile) (Prediction)",
+    Flag = "SilentAimMobilePrediction",
+    CurrentValue = false,
+    Callback = function(v)
+        if v then
+            if silentAimNoFailEnabled then
+                SetSilentAimState(false)
+                if window.Flags["SilentAimNoFailEnabled"] then
+                    window.Flags["SilentAimNoFailEnabled"]:Set(false)
+                end
             end
             startSilentAimMobilePrediction()
         else
@@ -1657,7 +1699,6 @@ SilentAimTab:CreateKeybind({
         end
     end
 })
-SilentAimTab:CreateSection("Silent Aim Settings")
 SilentAimTab:CreateToggle({ Name = "Show FOV", Flag = "SilentAimShowFOV", CurrentValue = true, Callback = function(v) silentAimSettings.showFOV = v end })
 SilentAimTab:CreateToggle({ Name = "Hide ESP Squares", Flag = "ShowESPIndicators", CurrentValue = true, Callback = function(v) showESPIndicators = v end })
 SilentAimTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(255, 255, 255), Flag = "SilentAimFOVColor", Callback = function(v) silentAimSettings.fovColor = v; SilentAimFOV.Color = v end })
