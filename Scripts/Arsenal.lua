@@ -366,6 +366,7 @@ local function createMainWindow()
     AutoFarmTab:CreateKeybind({
         Name = "Toggle AutoFarm",
         Flag = "AutoFarmKeybind",
+        CurrentKeybind = "",
         Callback = function()
             local newState = not AutoFarmSettings.Enabled
             AutoFarmSettings.Enabled = newState
@@ -426,6 +427,7 @@ local function createMainWindow()
     AimbotTab:CreateKeybind({
         Name = "Toggle Aimbot",
         Flag = "AimbotKeybind",
+        CurrentKeybind = "",
         Callback = function()
             local newState = not aimbotState.aimbotEnabled
             aimbotState.aimbotEnabled = newState
@@ -612,6 +614,7 @@ local function createMainWindow()
     HitboxTab:CreateKeybind({
         Name = "Toggle Hitbox",
         Flag = "HitboxKeybind",
+        CurrentKeybind = "",
         Callback = function()
             local newState = not HitboxSettings.Enabled
             HitboxSettings.Enabled = newState
@@ -927,6 +930,7 @@ local function createMainWindow()
     VisualTab:CreateKeybind({
         Name = "Toggle Highlights",
         Flag = "HighlightsKeybind",
+        CurrentKeybind = "",
         Callback = function()
             local newState = not ESPSettings.Highlights.Enabled
             ESPSettings.Highlights.Enabled = newState
