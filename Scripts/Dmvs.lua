@@ -1597,6 +1597,17 @@ InfoTab:CreateKeybind({
     end
 })
 
+AimbotTab:CreateKeybind({
+    Name = "Toggle Aimbot",
+    Flag = "AimbotToggleKeybind",
+    Callback = function()
+        local new = not aimbotState.enabled
+        aimbotState.enabled = new
+        if window.Flags["AimbotEnabled"] then
+            window.Flags["AimbotEnabled"]:Set(new)
+        end
+    end
+})
 AimbotTab:CreateSection("Aimbot Controls")
 AimbotTab:CreateToggle({ Name = "Enable Aimbot", Flag = "AimbotEnabled", CurrentValue = false, Callback = function(v) aimbotState.enabled = v end })
 AimbotTab:CreateToggle({ Name = "Only Gun", Flag = "AimbotOnlyGun", CurrentValue = false, Callback = function(v) aimbotState.onlyGun = v end })
@@ -1620,33 +1631,25 @@ AimbotTab:CreateDropdown({
 })
 AimbotTab:CreateToggle({ Name = "Wall Check", Flag = "AimbotVisibilityCheck", CurrentValue = false, Callback = function(v) aimbotState.visibilityCheck = v end })
 
-SilentAimTab:CreateSection("Silent Aim Settings")
-SilentAimTab:CreateToggle({
-    Name = "Silent Aim (No Fail)",
-    Flag = "SilentAimNoFailEnabled",
-    CurrentValue = false,
-    Callback = function(v)
-        if v and silentAimMobilePredictionEnabled then
+SilentAimTab:CreateKeybind({
+    Name = "Toggle Silent Aim No Fail",
+    Flag = "SilentAimNoFailKeybind",
+    Callback = function()
+        local newV = not silentAimNoFailEnabled
+        if newV and silentAimMobilePredictionEnabled then
             stopSilentAimMobilePrediction()
-            if window.Flags["SilentAimMobilePrediction"] then
-                window.Flags["SilentAimMobilePrediction"]:Set(false)
-            end
         end
-        SetSilentAimState(v)
+        SetSilentAimState(newV)
     end
 })
-SilentAimTab:CreateToggle({ Name = "Block Shoot", Flag = "BlockShoot", CurrentValue = false, Callback = function(v) SetSABlockShootState(v) end })
-SilentAimTab:CreateToggle({
-    Name = "Silent Aim (Mobile) (Prediction)",
-    Flag = "SilentAimMobilePrediction",
-    CurrentValue = false,
-    Callback = function(v)
-        if v then
+SilentAimTab:CreateKeybind({
+    Name = "Toggle Silent Aim Mobile",
+    Flag = "SilentAimMobileKeybind",
+    Callback = function()
+        local newV = not silentAimMobilePredictionEnabled
+        if newV then
             if silentAimNoFailEnabled then
                 SetSilentAimState(false)
-                if window.Flags["SilentAimNoFailEnabled"] then
-                    window.Flags["SilentAimNoFailEnabled"]:Set(false)
-                end
             end
             startSilentAimMobilePrediction()
         else
@@ -1654,6 +1657,7 @@ SilentAimTab:CreateToggle({
         end
     end
 })
+SilentAimTab:CreateSection("Silent Aim Settings")
 SilentAimTab:CreateToggle({ Name = "Show FOV", Flag = "SilentAimShowFOV", CurrentValue = true, Callback = function(v) silentAimSettings.showFOV = v end })
 SilentAimTab:CreateToggle({ Name = "Hide ESP Squares", Flag = "ShowESPIndicators", CurrentValue = true, Callback = function(v) showESPIndicators = v end })
 SilentAimTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(255, 255, 255), Flag = "SilentAimFOVColor", Callback = function(v) silentAimSettings.fovColor = v; SilentAimFOV.Color = v end })
@@ -1668,6 +1672,15 @@ SilentAimTab:CreateSlider({ Name = "FOV Size", Range = {50, 500}, Increment = 10
 SilentAimTab:CreateSlider({ Name = "Prediction", Range = {1, 100}, Increment = 1, CurrentValue = 80, Flag = "ClickShootPrediction", Callback = function(v) silentAimConfig.predictionStrength = v / 100; silentAimSettings.prediction = v end })
 SilentAimTab:CreateToggle({ Name = "Wall Check", Flag = "SilentAimWallCheck", CurrentValue = false, Callback = function(v) silentAimSettings.wallCheck = v end })
 
+HitboxTab:CreateKeybind({
+    Name = "Toggle Hitbox",
+    Flag = "HitboxToggleKeybind",
+    Callback = function()
+        if window.Flags["HitboxEnabled"] then
+            window.Flags["HitboxEnabled"]:Set(not HitboxSettings.Enabled)
+        end
+    end
+})
 HitboxTab:CreateSection("Hitbox Expansion")
 HitboxTab:CreateToggle({
     Name = "Enable Hitbox",
@@ -1729,6 +1742,18 @@ HitboxTab:CreateToggle({ Name = "Hitbox (Knife)", Flag = "HitboxKnife", CurrentV
 HitboxTab:CreateToggle({ Name = "Visibility Check", Flag = "HitboxAntiWall", CurrentValue = false, Callback = function(v) HitboxSettings.AntiWall = v end })
 HitboxTab:CreateSlider({ Name = "Size", Range = {1, 25}, Increment = 1, CurrentValue = 12, Flag = "HitboxSize", Callback = function(v) HitboxSettings.Size = v end })
 
+VisualTab:CreateKeybind({
+    Name = "Toggle Highlights",
+    Flag = "HighlightsKeybind",
+    Callback = function()
+        local newState = not ESPSettings.Highlights.Enabled
+        ESPSettings.Highlights.Enabled = newState
+        ESPSettings.Highlights.TeammatesEnabled = newState
+        if window.Flags["HighlightsEnabled"] then window.Flags["HighlightsEnabled"]:Set(newState) end
+        if window.Flags["TeammatesESPEnabled"] then window.Flags["TeammatesESPEnabled"]:Set(newState) end
+        updateESP()
+    end
+})
 VisualTab:CreateSection("ESP Visuals")
 VisualTab:CreateToggle({ Name = "Show Names", Flag = "ESPNames", CurrentValue = false, Callback = function(v) ESPSettings.Names = v end })
 VisualTab:CreateToggle({
@@ -1747,6 +1772,7 @@ VisualTab:CreateToggle({
                 end
             end
         end
+        updateESP()
     end
 })
 VisualTab:CreateColorPicker({ Name = "Enemy Color", Color = Color3.fromRGB(255, 0, 0), Flag = "HighlightsColor", Callback = function(v) ESPSettings.Highlights.Color = v end })
@@ -1768,6 +1794,7 @@ VisualTab:CreateToggle({
                 end
             end
         end
+        updateESP()
     end
 })
 VisualTab:CreateColorPicker({ Name = "Teammates Color", Color = Color3.fromRGB(135, 206, 235), Flag = "TeammatesColor", Callback = function(v) ESPSettings.Highlights.TeammatesColor = v end })
