@@ -236,7 +236,7 @@ end
 local function createMainWindow()
     local Window = SynergyUI:CreateWindow({
         Title = "Synergy Hub - Arsenal",
-        Author = "Xyraniz\nSynergy Team",
+        Author = "Xyraniz - Synergy Team",
         ToggleKey = Enum.KeyCode.X,
         AccentColor = Color3.fromRGB(100, 70, 255),
         ConfigFile = "SynergyHub_Arsenal.json",
@@ -372,7 +372,7 @@ local function createMainWindow()
         end
     })
     Window.Flags["AutoFarmEnabled"] = autoFarmToggle
-    
+
     AutoFarmTab:CreateKeybind({
         Name = "Toggle AutoFarm",
         Flag = "AutoFarmKeybind",
@@ -665,7 +665,7 @@ local function createMainWindow()
         end
     })
     Window.Flags["HitboxEnabled"] = hitboxToggle
-    
+
     HitboxTab:CreateKeybind({
         Name = "Toggle Hitbox",
         Flag = "HitboxKeybind",
