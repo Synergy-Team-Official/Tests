@@ -645,7 +645,10 @@ local function removeESP(char)
     end
 end
 
+local espEnabled = false
+
 local function applyESP(p, char)
+    if not espEnabled then return end
     local myTeam = LocalPlayer:GetAttribute("Team")
     local enemyTeam = p:GetAttribute("Team")
 
@@ -1506,7 +1509,7 @@ local TPTab = window:CreateTab("TPs")
 local ExtraTab = window:CreateTab("Extra")
 
 InfoTab:CreateSection("Information")
-InfoTab:CreateParagraph({Title = "What is Synergy Hub?", Content = "A Roblox script hub optimized for gameplay. Designed to dominate in games."})
+InfoTab:CreateParagraph({Title = "What is Synergy Hub?", Content = "A script hub for Roblox with universal and game-specific scripts. Designed to enhance your gaming experience."})
 InfoTab:CreateParagraph({Title = "Credits", Content = "Xyraniz\nSynergy Team"})
 InfoTab:CreateButton({Name = "Discord Server", Callback = function() setclipboard("https://discord.gg/WgxZwefhpz") end})
 
@@ -1709,9 +1712,22 @@ VisualTab:CreateKeybind({
     Name = "Toggle Highlights",
     Flag = "HighlightsKeybind",
     Callback = function()
+        espEnabled = not espEnabled
+        if espEnabled then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    applyESP(p, p.Character)
+                end
+            end
+        else
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p.Character then
+                    removeESP(p.Character)
+                end
+            end
+        end
         if window.Flags["HighlightsEnabled"] then
-            local newState = not window.Flags["HighlightsEnabled"].CurrentValue
-            window.Flags["HighlightsEnabled"]:Set(newState)
+            window.Flags["HighlightsEnabled"]:Set(espEnabled)
         end
     end
 })
@@ -1722,6 +1738,7 @@ VisualTab:CreateToggle({
     Flag = "HighlightsEnabled",
     CurrentValue = false,
     Callback = function(v)
+        espEnabled = v
         if v then
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= LocalPlayer and p.Character then
