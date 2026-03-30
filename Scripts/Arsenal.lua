@@ -294,7 +294,6 @@ local function createMainWindow()
     }
     
     local autoFarmConnection
-    local autoFarmToggleObj
     
     local function updateAutoFarm()
         if autoFarmConnection then
@@ -363,27 +362,24 @@ local function createMainWindow()
         end
     end
     
-    AutoFarmTab:CreateKeybind({
-        Name = "Toggle AutoFarm",
-        Flag = "AutoFarmKeybind",
-        CurrentKeybind = "",
-        Callback = function()
-            local newState = not AutoFarmSettings.Enabled
-            AutoFarmSettings.Enabled = newState
-            updateAutoFarm()
-            if autoFarmToggleObj then
-                autoFarmToggleObj:SetValue(newState)
-            end
-        end
-    })
-    
-    autoFarmToggleObj = AutoFarmTab:CreateToggle({
+    Window.Flags = Window.Flags or {}
+    Window.Flags["AutoFarmEnabled"] = AutoFarmTab:CreateToggle({
         Name = "AutoFarm Enabled",
         Flag = "AutoFarmEnabled",
         CurrentValue = false,
         Callback = function(v)
             AutoFarmSettings.Enabled = v
             updateAutoFarm()
+        end
+    })
+    
+    AutoFarmTab:CreateKeybind({
+        Name = "Toggle AutoFarm",
+        Flag = "AutoFarmKeybind",
+        CurrentKeybind = "",
+        Callback = function()
+            local newState = not Window.Flags["AutoFarmEnabled"].CurrentValue
+            Window.Flags["AutoFarmEnabled"]:Set(newState)
         end
     })
     
@@ -422,27 +418,22 @@ local function createMainWindow()
         end
     end)
 
-    local aimbotToggleObj
+    Window.Flags["AimbotEnabled"] = AimbotTab:CreateToggle({
+        Name = "Aimbot Enabled",
+        Flag = "AimbotEnabled",
+        CurrentValue = false,
+        Callback = function(v)
+            aimbotState.aimbotEnabled = v
+        end
+    })
     
     AimbotTab:CreateKeybind({
         Name = "Toggle Aimbot",
         Flag = "AimbotKeybind",
         CurrentKeybind = "",
         Callback = function()
-            local newState = not aimbotState.aimbotEnabled
-            aimbotState.aimbotEnabled = newState
-            if aimbotToggleObj then
-                aimbotToggleObj:SetValue(newState)
-            end
-        end
-    })
-    
-    aimbotToggleObj = AimbotTab:CreateToggle({
-        Name = "Aimbot Enabled",
-        Flag = "AimbotEnabled",
-        CurrentValue = false,
-        Callback = function(v)
-            aimbotState.aimbotEnabled = v
+            local newState = not Window.Flags["AimbotEnabled"].CurrentValue
+            Window.Flags["AimbotEnabled"]:Set(newState)
         end
     })
 
@@ -608,78 +599,8 @@ local function createMainWindow()
         end
         originalHitboxProperties = {}
     end
-
-    local hitboxToggleObj
     
-    HitboxTab:CreateKeybind({
-        Name = "Toggle Hitbox",
-        Flag = "HitboxKeybind",
-        CurrentKeybind = "",
-        Callback = function()
-            local newState = not HitboxSettings.Enabled
-            HitboxSettings.Enabled = newState
-            if hitboxToggleObj then
-                hitboxToggleObj:SetValue(newState)
-            end
-            
-            if newState then
-                spawn(function()
-                    while HitboxSettings.Enabled do
-                        pcall(function()
-                            for _,targetPlayer in pairs(Players:GetPlayers()) do
-                                if targetPlayer.Name ~= LocalPlayer.Name then
-                                    local shouldExpand = not (HitboxSettings.TeamCheck and isTeammate(targetPlayer))
-                                    
-                                    if targetPlayer.Character then
-                                        local bodyParts = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart", "LeftUpperArm", "RightUpperArm", "UpperTorso"}
-                                        for _, partName in pairs(bodyParts) do
-                                            local part = targetPlayer.Character:FindFirstChild(partName)
-                                            if part then
-                                                if not originalHitboxProperties[targetPlayer] then
-                                                    originalHitboxProperties[targetPlayer] = {}
-                                                end
-                                                if not originalHitboxProperties[targetPlayer][partName] then
-                                                    originalHitboxProperties[targetPlayer][partName] = {
-                                                        Size = part.Size,
-                                                        Transparency = part.Transparency,
-                                                        Color = part.Color,
-                                                        CanCollide = part.CanCollide
-                                                    }
-                                                end
-                                                
-                                                if shouldExpand then
-                                                    local newSize = Vector3.new(HitboxSettings.Size, HitboxSettings.Size, HitboxSettings.Size)
-                                                    if part.Size ~= newSize or part.Transparency ~= HitboxSettings.Transparency or part.Color ~= HitboxSettings.Color or part.CanCollide ~= false then
-                                                        part.CanCollide = false
-                                                        part.Transparency = HitboxSettings.Transparency
-                                                        part.Color = HitboxSettings.Color
-                                                        part.Size = newSize
-                                                    end
-                                                else
-                                                    local props = originalHitboxProperties[targetPlayer][partName]
-                                                    if part.Size ~= props.Size or part.Transparency ~= props.Transparency or part.Color ~= props.Color or part.CanCollide ~= props.CanCollide then
-                                                        part.Size = props.Size
-                                                        part.Transparency = props.Transparency
-                                                        part.Color = props.Color
-                                                        part.CanCollide = props.CanCollide
-                                                    end
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end)
-                        wait(1)
-                    end
-                end)
-            else
-                restoreAllHitboxes()
-            end
-        end
-    })
-    
-    hitboxToggleObj = HitboxTab:CreateToggle({
+    Window.Flags["HitboxEnabled"] = HitboxTab:CreateToggle({
         Name = "Hitbox",
         Flag = "HitboxEnabled",
         CurrentValue = false,
@@ -734,12 +655,22 @@ local function createMainWindow()
                                 end
                             end
                         end)
-                        wait(1)
+                        wait(0.3)
                     end
                 end)
             else
                 restoreAllHitboxes()
             end
+        end
+    })
+    
+    HitboxTab:CreateKeybind({
+        Name = "Toggle Hitbox",
+        Flag = "HitboxKeybind",
+        CurrentKeybind = "",
+        Callback = function()
+            local newState = not Window.Flags["HitboxEnabled"].CurrentValue
+            Window.Flags["HitboxEnabled"]:Set(newState)
         end
     })
 
@@ -925,22 +856,7 @@ local function createMainWindow()
         end
     end)
 
-    local highlightsToggleObj
-    
-    VisualTab:CreateKeybind({
-        Name = "Toggle Highlights",
-        Flag = "HighlightsKeybind",
-        CurrentKeybind = "",
-        Callback = function()
-            local newState = not ESPSettings.Highlights.Enabled
-            ESPSettings.Highlights.Enabled = newState
-            if highlightsToggleObj then
-                highlightsToggleObj:SetValue(newState)
-            end
-        end
-    })
-    
-    highlightsToggleObj = VisualTab:CreateToggle({
+    Window.Flags["HighlightsEnabled"] = VisualTab:CreateToggle({
         Name = "Highlights Enabled",
         Flag = "HighlightsEnabled",
         CurrentValue = false,
@@ -954,6 +870,16 @@ local function createMainWindow()
                 end
                 highlights = {}
             end
+        end
+    })
+    
+    VisualTab:CreateKeybind({
+        Name = "Toggle Highlights",
+        Flag = "HighlightsKeybind",
+        CurrentKeybind = "",
+        Callback = function()
+            local newState = not Window.Flags["HighlightsEnabled"].CurrentValue
+            Window.Flags["HighlightsEnabled"]:Set(newState)
         end
     })
     
