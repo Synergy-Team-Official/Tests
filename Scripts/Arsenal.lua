@@ -263,7 +263,7 @@ local function createMainWindow()
 
     InfoTab:CreateParagraph({
         Title = "Credits",
-        Content = "Xyraniz\nSynergyTeam"
+        Content = "Xyraniz - Synergy Team"
     })
 
     InfoTab:CreateButton({
@@ -362,8 +362,7 @@ local function createMainWindow()
         end
     end
     
-    Window.Flags = Window.Flags or {}
-    Window.Flags["AutoFarmEnabled"] = AutoFarmTab:CreateToggle({
+    local autoFarmToggle = AutoFarmTab:CreateToggle({
         Name = "AutoFarm Enabled",
         Flag = "AutoFarmEnabled",
         CurrentValue = false,
@@ -372,14 +371,15 @@ local function createMainWindow()
             updateAutoFarm()
         end
     })
+    Window.Flags["AutoFarmEnabled"] = autoFarmToggle
     
     AutoFarmTab:CreateKeybind({
         Name = "Toggle AutoFarm",
         Flag = "AutoFarmKeybind",
         CurrentKeybind = "",
         Callback = function()
-            local newState = not Window.Flags["AutoFarmEnabled"].CurrentValue
-            Window.Flags["AutoFarmEnabled"]:Set(newState)
+            local newState = not autoFarmToggle.GetValue()
+            autoFarmToggle.SetValue(newState)
         end
     })
     
@@ -418,7 +418,7 @@ local function createMainWindow()
         end
     end)
 
-    Window.Flags["AimbotEnabled"] = AimbotTab:CreateToggle({
+    local aimbotToggle = AimbotTab:CreateToggle({
         Name = "Aimbot Enabled",
         Flag = "AimbotEnabled",
         CurrentValue = false,
@@ -426,14 +426,15 @@ local function createMainWindow()
             aimbotState.aimbotEnabled = v
         end
     })
-    
+    Window.Flags["AimbotEnabled"] = aimbotToggle
+
     AimbotTab:CreateKeybind({
         Name = "Toggle Aimbot",
         Flag = "AimbotKeybind",
         CurrentKeybind = "",
         Callback = function()
-            local newState = not Window.Flags["AimbotEnabled"].CurrentValue
-            Window.Flags["AimbotEnabled"]:Set(newState)
+            local newState = not aimbotToggle.GetValue()
+            aimbotToggle.SetValue(newState)
         end
     })
 
@@ -600,7 +601,7 @@ local function createMainWindow()
         originalHitboxProperties = {}
     end
     
-    Window.Flags["HitboxEnabled"] = HitboxTab:CreateToggle({
+    local hitboxToggle = HitboxTab:CreateToggle({
         Name = "Hitbox",
         Flag = "HitboxEnabled",
         CurrentValue = false,
@@ -663,17 +664,18 @@ local function createMainWindow()
             end
         end
     })
+    Window.Flags["HitboxEnabled"] = hitboxToggle
     
     HitboxTab:CreateKeybind({
         Name = "Toggle Hitbox",
         Flag = "HitboxKeybind",
         CurrentKeybind = "",
         Callback = function()
-            local newState = not Window.Flags["HitboxEnabled"].CurrentValue
-            Window.Flags["HitboxEnabled"]:Set(newState)
+            local newState = not hitboxToggle.GetValue()
+            hitboxToggle.SetValue(newState)
         end
     })
-
+    
     HitboxTab:CreateSlider({
         Name = "Hitbox Size",
         Flag = "HitboxSize",
@@ -856,7 +858,7 @@ local function createMainWindow()
         end
     end)
 
-    Window.Flags["HighlightsEnabled"] = VisualTab:CreateToggle({
+    local highlightsToggle = VisualTab:CreateToggle({
         Name = "Highlights Enabled",
         Flag = "HighlightsEnabled",
         CurrentValue = false,
@@ -872,14 +874,15 @@ local function createMainWindow()
             end
         end
     })
-    
+    Window.Flags["HighlightsEnabled"] = highlightsToggle
+
     VisualTab:CreateKeybind({
         Name = "Toggle Highlights",
         Flag = "HighlightsKeybind",
         CurrentKeybind = "",
         Callback = function()
-            local newState = not Window.Flags["HighlightsEnabled"].CurrentValue
-            Window.Flags["HighlightsEnabled"]:Set(newState)
+            local newState = not highlightsToggle.GetValue()
+            highlightsToggle.SetValue(newState)
         end
     })
     
@@ -1253,7 +1256,7 @@ local function createMainWindow()
         end 
     end)
 
-    PlayerTab:CreateToggle({
+    local flyToggle = PlayerTab:CreateToggle({
         Name = "Fly",
         Flag = "FlyEnabled",
         CurrentValue = false,
@@ -1266,6 +1269,7 @@ local function createMainWindow()
             end
         end
     })
+    Window.Flags["FlyEnabled"] = flyToggle
 
     PlayerTab:CreateSlider({
         Name = "Flight Speed",
@@ -1313,7 +1317,7 @@ local function createMainWindow()
         end
     })
 
-    PlayerTab:CreateToggle({
+    local speedHackToggle = PlayerTab:CreateToggle({
         Name = "Speed Hack",
         Flag = "SpeedHack",
         CurrentValue = false,
@@ -1337,8 +1341,9 @@ local function createMainWindow()
             end)
         end
     })
+    Window.Flags["SpeedHack"] = speedHackToggle
 
-    PlayerTab:CreateToggle({
+    local infJumpToggle = PlayerTab:CreateToggle({
         Name = "Infinite Jump",
         Flag = "InfJump",
         CurrentValue = false,
@@ -1360,8 +1365,9 @@ local function createMainWindow()
             end
         end
     })
+    Window.Flags["InfJump"] = infJumpToggle
 
-    PlayerTab:CreateToggle({
+    local noclipToggle = PlayerTab:CreateToggle({
         Name = "Noclip",
         Flag = "Noclip",
         CurrentValue = false,
@@ -1391,6 +1397,7 @@ local function createMainWindow()
             end
         end
     })
+    Window.Flags["Noclip"] = noclipToggle
 
     PlayerTab:CreateSlider({
         Name = "Arsenal FOV",
