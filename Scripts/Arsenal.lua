@@ -236,7 +236,7 @@ end
 local function createMainWindow()
     local Window = SynergyUI:CreateWindow({
         Title = "Synergy Hub - Arsenal",
-        Author = "Xyraniz - Synergy Team",
+        Author = "Xyraniz\nSynergy Team",
         ToggleKey = Enum.KeyCode.X,
         AccentColor = Color3.fromRGB(100, 70, 255),
         ConfigFile = "SynergyHub_Arsenal.json",
@@ -372,7 +372,7 @@ local function createMainWindow()
         end
     })
     Window.Flags["AutoFarmEnabled"] = autoFarmToggle
-
+    
     AutoFarmTab:CreateKeybind({
         Name = "Toggle AutoFarm",
         Flag = "AutoFarmKeybind",
@@ -418,6 +418,20 @@ local function createMainWindow()
         end
     end)
 
+    -- Aimbot Tab (keybind at top)
+    AimbotTab:CreateKeybind({
+        Name = "Toggle Aimbot",
+        Flag = "AimbotKeybind",
+        CurrentKeybind = "",
+        Callback = function()
+            local newState = not aimbotState.aimbotEnabled
+            aimbotState.aimbotEnabled = newState
+            if Window.Flags["AimbotEnabled"] then
+                Window.Flags["AimbotEnabled"]:Set(newState)
+            end
+        end
+    })
+
     local aimbotToggle = AimbotTab:CreateToggle({
         Name = "Aimbot Enabled",
         Flag = "AimbotEnabled",
@@ -427,16 +441,6 @@ local function createMainWindow()
         end
     })
     Window.Flags["AimbotEnabled"] = aimbotToggle
-
-    AimbotTab:CreateKeybind({
-        Name = "Toggle Aimbot",
-        Flag = "AimbotKeybind",
-        CurrentKeybind = "",
-        Callback = function()
-            local newState = not aimbotToggle.GetValue()
-            aimbotToggle.SetValue(newState)
-        end
-    })
 
     AimbotTab:CreateToggle({
         Name = "Show FOV",
@@ -601,13 +605,80 @@ local function createMainWindow()
         originalHitboxProperties = {}
     end
     
+    -- Hitbox Tab (keybind at top)
+    HitboxTab:CreateKeybind({
+        Name = "Toggle Hitbox",
+        Flag = "HitboxKeybind",
+        CurrentKeybind = "",
+        Callback = function()
+            local newState = not HitboxSettings.Enabled
+            HitboxSettings.Enabled = newState
+            if Window.Flags["HitboxEnabled"] then
+                Window.Flags["HitboxEnabled"]:Set(newState)
+            end
+            if newState then
+                spawn(function()
+                    while HitboxSettings.Enabled do
+                        pcall(function()
+                            for _,targetPlayer in pairs(Players:GetPlayers()) do
+                                if targetPlayer.Name ~= LocalPlayer.Name then
+                                    local shouldExpand = not (HitboxSettings.TeamCheck and isTeammate(targetPlayer))
+                                    
+                                    if targetPlayer.Character then
+                                        local bodyParts = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart", "LeftUpperArm", "RightUpperArm", "UpperTorso"}
+                                        for _, partName in pairs(bodyParts) do
+                                            local part = targetPlayer.Character:FindFirstChild(partName)
+                                            if part then
+                                                if not originalHitboxProperties[targetPlayer] then
+                                                    originalHitboxProperties[targetPlayer] = {}
+                                                end
+                                                if not originalHitboxProperties[targetPlayer][partName] then
+                                                    originalHitboxProperties[targetPlayer][partName] = {
+                                                        Size = part.Size,
+                                                        Transparency = part.Transparency,
+                                                        Color = part.Color,
+                                                        CanCollide = part.CanCollide
+                                                    }
+                                                end
+                                                
+                                                if shouldExpand then
+                                                    local newSize = Vector3.new(HitboxSettings.Size, HitboxSettings.Size, HitboxSettings.Size)
+                                                    if part.Size ~= newSize or part.Transparency ~= HitboxSettings.Transparency or part.Color ~= HitboxSettings.Color or part.CanCollide ~= false then
+                                                        part.CanCollide = false
+                                                        part.Transparency = HitboxSettings.Transparency
+                                                        part.Color = HitboxSettings.Color
+                                                        part.Size = newSize
+                                                    end
+                                                else
+                                                    local props = originalHitboxProperties[targetPlayer][partName]
+                                                    if part.Size ~= props.Size or part.Transparency ~= props.Transparency or part.Color ~= props.Color or part.CanCollide ~= props.CanCollide then
+                                                        part.Size = props.Size
+                                                        part.Transparency = props.Transparency
+                                                        part.Color = props.Color
+                                                        part.CanCollide = props.CanCollide
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end)
+                        wait(0.3)
+                    end
+                end)
+            else
+                restoreAllHitboxes()
+            end
+        end
+    })
+
     local hitboxToggle = HitboxTab:CreateToggle({
         Name = "Hitbox",
         Flag = "HitboxEnabled",
         CurrentValue = false,
         Callback = function(v)
             HitboxSettings.Enabled = v
-            
             if v then
                 spawn(function()
                     while HitboxSettings.Enabled do
@@ -665,16 +736,6 @@ local function createMainWindow()
         end
     })
     Window.Flags["HitboxEnabled"] = hitboxToggle
-
-    HitboxTab:CreateKeybind({
-        Name = "Toggle Hitbox",
-        Flag = "HitboxKeybind",
-        CurrentKeybind = "",
-        Callback = function()
-            local newState = not hitboxToggle.GetValue()
-            hitboxToggle.SetValue(newState)
-        end
-    })
     
     HitboxTab:CreateSlider({
         Name = "Hitbox Size",
