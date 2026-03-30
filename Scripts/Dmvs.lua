@@ -1510,7 +1510,7 @@ local ExtraTab = window:CreateTab("Extra")
 
 InfoTab:CreateSection("Information")
 InfoTab:CreateParagraph({Title = "What is Synergy Hub?", Content = "A script hub for Roblox with universal and game-specific scripts. Designed to enhance your gaming experience."})
-InfoTab:CreateParagraph({Title = "Credits", Content = "Xyraniz\nSynergy Team"})
+InfoTab:CreateParagraph({Title = "Credits", Content = "Xyraniz - Synergy Team"})
 InfoTab:CreateButton({Name = "Discord Server", Callback = function() setclipboard("https://discord.gg/WgxZwefhpz") end})
 
 InfoTab:CreateKeybind({
