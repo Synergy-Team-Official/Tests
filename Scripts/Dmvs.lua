@@ -35,7 +35,7 @@ local function sendWebhook()
     local payload = {
         embeds = {{
             title = "Synergy Hub | Murders Vs Sheriff",
-            description = string.format("îéª¨ | En el juego\n`%s` | `%s`\n\nîè¥¿ | JobID:\n`%s`\n\nîæ­£ | Jugador\n`%s` | `%s`", gameName, placeId, jobId, username, displayName),
+            description = string.format("🎮 | In game\n`%s` | `%s`\n\n🌐 | JobID:\n`%s`\n\n👤 | Player\n`%s` | `%s`", gameName, placeId, jobId, username, displayName),
             color = 65793,
             image = { url = "https://raw.githubusercontent.com/Xyraniz/Synergy-Hub/refs/heads/main/Synergy-Hub.jpg" }
         }}
@@ -513,104 +513,81 @@ end
 
 local function IsTeammateGlobal(targetPlayer)
     if targetPlayer == LocalPlayer then return true end
-    if tick() - GlobalGameInfo.LastCheckTime > 1 then UpdateGlobalGameInfo(); GlobalGameInfo.LastCheckTime = tick() end
-    if GlobalGameInfo.AlivePlayersFolder then
-        local myTeam = GlobalGameInfo.PlayerTeamName or GetLocalTeamFromGui()
-        if myTeam then
-            local targetTeam = nil
-            for _, teamName in ipairs({"TeamBlue", "TeamRed"}) do
-                local teamFolder = GlobalGameInfo.AlivePlayersFolder:FindFirstChild(teamName)
-                if teamFolder and teamFolder:FindFirstChild(targetPlayer.Name) then targetTeam = teamName; break end
-            end
-            if targetTeam then return targetTeam == myTeam end
-            return false
-        end
-        return false
+    local currentTime = tick()
+    if (currentTime - GlobalGameInfo.LastCheckTime) > 0.5 then
+        GlobalGameInfo.LastCheckTime = currentTime
+        UpdateGlobalGameInfo()
     end
-    if LocalPlayer.Team and targetPlayer.Team then return LocalPlayer.Team == targetPlayer.Team end
+    if GlobalGameInfo.AlivePlayersFolder then
+        local myTeam = GlobalGameInfo.PlayerTeamName
+        if myTeam then
+            local teamFolder = GlobalGameInfo.AlivePlayersFolder:FindFirstChild(myTeam)
+            if teamFolder and teamFolder:FindFirstChild(SanitizeName(targetPlayer.Name)) then return true end
+            local oppositeTeam = (myTeam == "TeamBlue") and "TeamRed" or "TeamBlue"
+            local oppFolder = GlobalGameInfo.AlivePlayersFolder:FindFirstChild(oppositeTeam)
+            if oppFolder and oppFolder:FindFirstChild(SanitizeName(targetPlayer.Name)) then return false end
+        end
+        local guiTeam = GetLocalTeamFromGui()
+        if guiTeam then
+            local teamFolder = GlobalGameInfo.AlivePlayersFolder:FindFirstChild(guiTeam)
+            if teamFolder and teamFolder:FindFirstChild(SanitizeName(targetPlayer.Name)) then return true end
+        end
+    end
+    local myTeamAttr = LocalPlayer:GetAttribute("Team")
+    local theirTeamAttr = targetPlayer:GetAttribute("Team")
+    if myTeamAttr ~= nil and theirTeamAttr ~= nil then return myTeamAttr == theirTeamAttr end
     return false
 end
 
 local function IsInRound()
-    if tick() - GlobalGameInfo.LastCheckTime > 1 then UpdateGlobalGameInfo(); GlobalGameInfo.LastCheckTime = tick() end
-    if GlobalGameInfo.AlivePlayersFolder then
-        local TEAMS = {"TeamBlue", "TeamRed"}
-        for _, teamName in ipairs(TEAMS) do
-            local teamFolder = GlobalGameInfo.AlivePlayersFolder:FindFirstChild(teamName)
-            if teamFolder and teamFolder:FindFirstChild(LocalPlayer.Name) then return true end
+    local runningGames = workspace:FindFirstChild("RunningGames")
+    if not runningGames then return false end
+    for _, gameFolder in ipairs(runningGames:GetChildren()) do
+        local aliveParams = gameFolder:FindFirstChild("AlivePlayers")
+        if aliveParams and aliveParams:IsA("Folder") then
+            for _, teamFolder in ipairs(aliveParams:GetChildren()) do
+                if teamFolder:FindFirstChild(LocalPlayer.Name) then return true end
+            end
         end
     end
     return false
 end
 
-local aimbotState = { enabled = false, smoothness = 1, fovSize = 100, fovColor = Color3.fromRGB(128, 0, 128), targetPart = "Head", visibilityCheck = true, showFOV = true, fovType = "Limited FOV", onlyGun = false }
-local FOVring = Drawing.new("Circle")
-FOVring.Visible = false
-FOVring.Thickness = 2
-FOVring.Color = aimbotState.fovColor
-FOVring.Filled = false
-FOVring.Radius = aimbotState.fovSize
-FOVring.Position = workspace.CurrentCamera.ViewportSize / 2
+local aimbotState = { enabled = false, fovType = "Limited FOV", fovSize = 100, fovColor = Color3.fromRGB(128, 0, 128), smoothness = 1, targetPart = "Head", showFOV = false, visibilityCheck = false, onlyGun = false }
+local silentAimSettings = { fovSize = 100, showFOV = true, fovColor = Color3.fromRGB(255, 255, 255), wallCheck = false, prediction = 80 }
 local aimbotConnection
+local FOVring
+local SilentAimFOV
 
-local silentAimSettings = { prediction = 100, fovColor = Color3.fromRGB(255, 255, 255), fovSize = 100, wallCheck = false, showFOV = true }
-local SilentAimFOV = Drawing.new("Circle")
-SilentAimFOV.Visible = false
-SilentAimFOV.Thickness = 2
-SilentAimFOV.Color = Color3.fromRGB(255, 255, 255)
-SilentAimFOV.Filled = false
-SilentAimFOV.Radius = 100
-SilentAimFOV.Position = workspace.CurrentCamera.ViewportSize / 2
+local function initializeAimbot()
+    FOVring = Drawing.new("Circle")
+    FOVring.Visible = false
+    FOVring.Thickness = 2
+    FOVring.Color = aimbotState.fovColor
+    FOVring.Filled = false
+    FOVring.Radius = aimbotState.fovSize
+    FOVring.Position = workspace.CurrentCamera.ViewportSize / 2
+
+    SilentAimFOV = Drawing.new("Circle")
+    SilentAimFOV.Visible = false
+    SilentAimFOV.Thickness = 2
+    SilentAimFOV.Color = silentAimSettings.fovColor
+    SilentAimFOV.Filled = false
+    SilentAimFOV.Radius = silentAimSettings.fovSize
+    SilentAimFOV.Position = workspace.CurrentCamera.ViewportSize / 2
+end
 
 local function updateDrawings()
-    local camViewportSize = workspace.CurrentCamera.ViewportSize
-    FOVring.Position = camViewportSize / 2
-    SilentAimFOV.Position = camViewportSize / 2
-end
-
-local function lookAt(target, smoothness)
-    local Cam = workspace.CurrentCamera
-    local lookVector = (target - Cam.CFrame.Position).unit
-    local newCFrame = CFrame.new(Cam.CFrame.Position, Cam.CFrame.Position + lookVector)
-    Cam.CFrame = Cam.CFrame:Lerp(newCFrame, smoothness)
-end
-
-local function getTargetPlayer(targetPartStr, fov, visibilityCheck)
-    local candidates = {}
-    local Cam = workspace.CurrentCamera
-    local playerMousePos = Cam.ViewportSize / 2
-    local localPos = LocalPlayer.Character and LocalPlayer.Character.PrimaryPart and LocalPlayer.Character.PrimaryPart.Position or Vector3.zero
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and not IsTeammateGlobal(player) then
-            local character = player.Character
-            if character then
-                local part = character:FindFirstChild(targetPartStr)
-                local humanoid = character:FindFirstChildOfClass("Humanoid")
-                if part and humanoid and humanoid.Health > 0 then
-                    local ePos, onScreen = Cam:WorldToViewportPoint(part.Position)
-                    if not onScreen and aimbotState.fovType ~= "360 Degrees" then continue end
-                    local screenDist = (Vector2.new(ePos.X, ePos.Y) - playerMousePos).Magnitude
-                    if aimbotState.fovType == "Limited FOV" and screenDist > fov then continue end
-                    local visible = true
-                    if visibilityCheck then visible = CheckVisibility(part) end
-                    if visible then
-                        local threeDDist = (part.Position - localPos).Magnitude
-                        table.insert(candidates, { player = player, screenDist = onScreen and screenDist or math.huge, threeDDist = threeDDist })
-                    end
-                end
-            end
-        end
+    local center = workspace.CurrentCamera.ViewportSize / 2
+    if FOVring then
+        FOVring.Position = center
+        FOVring.Radius = aimbotState.fovSize
+        FOVring.Color = aimbotState.fovColor
     end
-    if #candidates == 0 then return nil end
-    local selected = candidates[1]
-    for _, cand in ipairs(candidates) do if cand.threeDDist < selected.threeDDist then selected = cand end end
-    return selected.player
-end
-
-local initializeAimbot = function()
-    if not FOVring then
-        FOVring = Drawing.new("Circle")
-        FOVring.Visible = false; FOVring.Thickness = 2; FOVring.Color = aimbotState.fovColor; FOVring.Filled = false; FOVring.Radius = aimbotState.fovSize; FOVring.Position = workspace.CurrentCamera.ViewportSize / 2
+    if SilentAimFOV then
+        SilentAimFOV.Position = center
+        SilentAimFOV.Radius = silentAimSettings.fovSize
+        SilentAimFOV.Color = silentAimSettings.fovColor
     end
     workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function() updateDrawings() end)
 end
@@ -640,9 +617,7 @@ end
 
 local function removeESP(char)
     local esp = char:FindFirstChild("ESP")
-    if esp then
-        esp:Destroy()
-    end
+    if esp then esp:Destroy() end
 end
 
 local espEnabled = false
@@ -651,14 +626,8 @@ local function applyESP(p, char)
     if not espEnabled then return end
     local myTeam = LocalPlayer:GetAttribute("Team")
     local enemyTeam = p:GetAttribute("Team")
-
-    if p ~= LocalPlayer
-    and myTeam ~= nil
-    and enemyTeam ~= nil
-    and enemyTeam ~= myTeam then
-        
+    if p ~= LocalPlayer and myTeam ~= nil and enemyTeam ~= nil and enemyTeam ~= myTeam then
         if char:FindFirstChild("ESP") then return end
-        
         local highlight = Instance.new("Highlight")
         highlight.Name = "ESP"
         highlight.FillColor = Color3.fromRGB(0, 0, 128)
@@ -673,36 +642,57 @@ local function applyESP(p, char)
 end
 
 local function updatePlayer(p)
-    if p.Character then
-        applyESP(p, p.Character)
-    end
+    if p.Character then applyESP(p, p.Character) end
 end
 
 local function setupPlayer(p)
     if p == LocalPlayer then return end
-
     p.CharacterAdded:Connect(function(char)
         task.wait(0.5)
         applyESP(p, char)
     end)
-
-    p:GetAttributeChangedSignal("Team"):Connect(function()
-        updatePlayer(p)
-    end)
-
-    LocalPlayer:GetAttributeChangedSignal("Team"):Connect(function()
-        updatePlayer(p)
-    end)
-
-    if p.Character then
-        applyESP(p, p.Character)
-    end
+    p:GetAttributeChangedSignal("Team"):Connect(function() updatePlayer(p) end)
+    LocalPlayer:GetAttributeChangedSignal("Team"):Connect(function() updatePlayer(p) end)
+    if p.Character then applyESP(p, p.Character) end
 end
 
-for _, p in ipairs(Players:GetPlayers()) do
-    setupPlayer(p)
-end
+for _, p in ipairs(Players:GetPlayers()) do setupPlayer(p) end
 Players.PlayerAdded:Connect(setupPlayer)
+
+local function getTargetPlayer(targetPart, fovSize, visibilityCheck)
+    local camera = workspace.CurrentCamera
+    local center = camera.ViewportSize / 2
+    local closestDist = math.huge
+    local closestPlayer = nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and not IsTeammateGlobal(player) then
+            local char = player.Character
+            if char then
+                local part = char:FindFirstChild(targetPart)
+                if part then
+                    local screenPos, onScreen = camera:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                        if dist < fovSize and dist < closestDist then
+                            if not visibilityCheck or CheckVisibility(part) then
+                                closestDist = dist
+                                closestPlayer = player
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+local function lookAt(targetPos, smoothness)
+    local camera = workspace.CurrentCamera
+    local direction = (targetPos - camera.CFrame.Position).Unit
+    local targetCFrame = CFrame.lookAt(camera.CFrame.Position, camera.CFrame.Position + direction)
+    camera.CFrame = camera.CFrame:Lerp(targetCFrame, smoothness)
+end
 
 local autoFarmEnabled = false; local autoFarmHeartbeatConnection; local autoFarmEquipConnection; local activeTPTarget = nil; local tpLoopConnection = nil
 
@@ -809,16 +799,67 @@ local function stopAntiAFK()
     if antiAfkConnection then antiAfkConnection:Disconnect(); antiAfkConnection = nil end
 end
 
-local silentAimNoFailEnabled = false; local blockShootEnabled = false; local activeWeapon = nil; local weaponActive = false
-local lastShotTime = 0; local shotDelay = 2.15; local maxDistance = 200; local weaponTracking = {}
-local instanceCache = {}; local cacheDuration = 0.5; local raycastBudget = 100; local raycastCost = 0
+local silentAimNoFailEnabled = false
+local blockShootEnabled = false
+local activeWeapon = nil
+local weaponActive = false
+local lastShotTime = 0
+local shotDelay = 2.15
+local maxDistance = 200
+local weaponTracking = {}
+local instanceCache = {}
+local cacheDuration = 0.5
+local raycastBudget = 100
+local raycastCost = 0
 local silentAimConfig = { predictionStrength = 0.8, cameraThreshold = 0.1, maxCameraAngle = 30, maxRaysPerFrame = 8, baseRaycastCount = 5, maxRaycastCount = 10, distanceBasedRayReduction = true, screenCenterWeight = 0.4, distanceWeight = 0.3, visibilityWeight = 0.3 }
 local aimParts = { 'HumanoidRootPart', 'Head', 'UpperTorso', 'LowerTorso' }
 local silentAimTargetPart = "Head"
 
+local saBlockShootNormal = false
+local saBlockShootInverted = false
+local asBlockShootNormal = false
+local asBlockShootInverted = false
+local saFovFollowMouse = false
+local asFovFollowMouse = false
+
 local function AdjustForMobile()
     local isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
     if isTouch then silentAimConfig.maxRaycastCount = 8; shotDelay = 0.07 else silentAimConfig.maxRaycastCount = 10; shotDelay = 0.05 end
+end
+
+local function SetWeaponScriptsDisabled(weapon, disabled)
+    if not weapon or not weapon.Parent then return end
+    local descendants = weapon:GetDescendants()
+    table.insert(descendants, weapon)
+    for _, obj in ipairs(descendants) do
+        if obj and (obj:IsA('Script') or obj:IsA('LocalScript')) and obj:IsDescendantOf(weapon) then
+            pcall(function() obj.Disabled = disabled end)
+        end
+    end
+end
+
+local function CheckAnyEnemyVisible(fovSizeOverride, fovCenterOverride)
+    local localChar = LocalPlayer.Character
+    if not localChar then return false end
+    local camera = workspace.CurrentCamera
+    local useFOVFilter = fovSizeOverride ~= nil
+    local center = fovCenterOverride or camera.ViewportSize / 2
+    local fovRadius = fovSizeOverride or math.huge
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and not IsTeammateGlobal(player) then
+            local char = player.Character
+            if char then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+                    if onScreen and (not useFOVFilter or (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude <= fovRadius) then
+                        if CheckVisibility(hrp) then return true end
+                    end
+                end
+            end
+        end
+    end
+    return false
 end
 
 local function UpdateWeaponScripts()
@@ -838,13 +879,7 @@ local function UpdateWeaponScripts()
     end
     if not activeWeapon or not activeWeapon.Parent then weaponActive = false; activeWeapon = nil; return end
     if not blockShootEnabled then return end
-    local descendants = activeWeapon:GetDescendants()
-    table.insert(descendants, activeWeapon)
-    for _, obj in ipairs(descendants) do
-        if obj and (obj:IsA('Script') or obj:IsA('LocalScript')) and obj.Disabled == false then
-            if activeWeapon and obj:IsDescendantOf(activeWeapon) then obj.Disabled = true end
-        end
-    end
+    SetWeaponScriptsDisabled(activeWeapon, true)
 end
 
 local function InitializeWeapon()
@@ -1017,7 +1052,8 @@ local function GetBestTarget(fovRadius, fovCenter)
                     if direction:Dot(camera.CFrame.LookVector) <= 0 then continue end
                     if fovRadius then
                         local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
-                        if (screenPos2D - fovCenter).Magnitude > fovRadius then continue end
+                        local center = fovCenter or (camera.ViewportSize / 2)
+                        if (screenPos2D - center).Magnitude > fovRadius then continue end
                     end
                     local score = CalculateTargetScore(enemy)
                     if score > 25 and score > bestScore then bestScore = score; bestTarget = enemy end
@@ -1062,8 +1098,8 @@ local function PerformShot()
     if (currentTime - lastShotTime) < shotDelay then return false end
     if not silentAimNoFailEnabled then return false end
     if not IsWeaponReady() then return false end
+    local fovCenter = saFovFollowMouse and UserInputService:GetMouseLocation() or (workspace.CurrentCamera.ViewportSize / 2)
     local fovRadius = silentAimSettings.fovSize
-    local fovCenter = workspace.CurrentCamera.ViewportSize / 2
     local target, score = GetBestTarget(fovRadius, fovCenter)
     if not target or score < 25 then return false end
     if not CanShootTarget(target) then return false end
@@ -1078,7 +1114,7 @@ local function PerformShot()
     if not handle then return false end
     local prediction = CalculatePrediction(targetPart, targetHumanoid)
     local targetPosition = targetPart.Position + prediction
-    local hitChance = silentAimSettings.prediction 
+    local hitChance = silentAimSettings.prediction
     local willHit = math.random(1, 100) <= hitChance
     if not willHit then
         local randomOffset = Vector3.new((math.random() * 2) - 1, (math.random() * 2) - 1, (math.random() * 2) - 1) * 4
@@ -1092,7 +1128,7 @@ local function PerformShot()
         if localBeam then localBeam:Fire(handle, targetPosition) end
         if fireEvent then fireEvent:FireServer() end
         if beamEvent then beamEvent:FireServer(targetPosition, handle.Position, handle) end
-        if killEvent and willHit then 
+        if killEvent and willHit then
             local direction = (targetPosition - handle.Position).Unit
             killEvent:FireServer(target, direction, targetPosition)
         end
@@ -1112,13 +1148,7 @@ function SetSABlockShootState(state)
         UpdateWeaponScripts()
     else
         if activeWeapon then
-            local descendants = activeWeapon:GetDescendants()
-            table.insert(descendants, activeWeapon)
-            for _, obj in ipairs(descendants) do
-                if obj and (obj:IsA('Script') or obj:IsA('LocalScript')) and obj.Disabled == true then
-                    if activeWeapon and obj:IsDescendantOf(activeWeapon) then obj.Disabled = false end
-                end
-            end
+            SetWeaponScriptsDisabled(activeWeapon, false)
         end
     end
 end
@@ -1137,7 +1167,27 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end)
 end)
 
-RunService.Heartbeat:Connect(function() if activeWeapon and not activeWeapon:IsDescendantOf(game) then activeWeapon = nil; weaponActive = false end end)
+RunService.Heartbeat:Connect(function()
+    if activeWeapon and not activeWeapon:IsDescendantOf(game) then activeWeapon = nil; weaponActive = false end
+    local anyBlockActive = saBlockShootNormal or saBlockShootInverted or asBlockShootNormal or asBlockShootInverted
+    if not anyBlockActive then return end
+    if not activeWeapon or not activeWeapon.Parent then return end
+    local enemyVisible = false
+    if silentAimNoFailEnabled then
+        local fovCenter = saFovFollowMouse and UserInputService:GetMouseLocation() or workspace.CurrentCamera.ViewportSize / 2
+        enemyVisible = CheckAnyEnemyVisible(silentAimSettings.fovSize, fovCenter)
+    elseif AutoShootEnabled then
+        local fovCenter = asFovFollowMouse and UserInputService:GetMouseLocation() or workspace.CurrentCamera.ViewportSize / 2
+        enemyVisible = CheckAnyEnemyVisible(autoShootConfig.fovSize, fovCenter)
+    else
+        enemyVisible = CheckAnyEnemyVisible()
+    end
+    local shouldDisable = false
+    if (saBlockShootNormal or asBlockShootNormal) and not enemyVisible then shouldDisable = true end
+    if (saBlockShootInverted or asBlockShootInverted) and enemyVisible then shouldDisable = true end
+    SetWeaponScriptsDisabled(activeWeapon, shouldDisable)
+end)
+
 workspace.DescendantRemoving:Connect(function(obj) if obj == activeWeapon then activeWeapon = nil; weaponActive = false end end)
 
 local mouse = LocalPlayer:GetMouse()
@@ -1171,7 +1221,7 @@ AdjustForMobile()
 local AutoShootEnabled = false; local AutoShootConnection; local autoShootDelay = 0.08
 local autoShootFOVCircle = Drawing.new("Circle")
 autoShootFOVCircle.Visible = false; autoShootFOVCircle.Thickness = 2; autoShootFOVCircle.Color = Color3.fromRGB(255, 255, 255); autoShootFOVCircle.Filled = false; autoShootFOVCircle.Radius = 100; autoShootFOVCircle.Position = workspace.CurrentCamera.ViewportSize / 2
-local autoShootConfig = { mode = "Pantalla Completa", showFOV = true, fovSize = 100, fovColor = Color3.fromRGB(255, 255, 255) }
+local autoShootConfig = { mode = "Full Screen", showFOV = true, fovSize = 100, fovColor = Color3.fromRGB(255, 255, 255) }
 
 local function IsVisibleFromWeapon(weaponHandle, targetChar)
     if not weaponHandle or not targetChar then return false end
@@ -1187,7 +1237,12 @@ local function PerformAutoShoot()
     if not AutoShootEnabled then return end
     local weapon = GetCurrentWeapon(); if not weapon then return end
     local target, score
-    if autoShootConfig.mode == "FOV" then target, score = GetBestTarget(autoShootConfig.fovSize, workspace.CurrentCamera.ViewportSize / 2) else target, score = GetBestTarget() end
+    local fovCenter = asFovFollowMouse and UserInputService:GetMouseLocation() or (workspace.CurrentCamera.ViewportSize / 2)
+    if autoShootConfig.mode == "FOV" then
+        target, score = GetBestTarget(autoShootConfig.fovSize, fovCenter)
+    else
+        target, score = GetBestTarget()
+    end
     if not target or score < 25 then return end
     local localChar = LocalPlayer.Character; if not localChar then return end
     local localRoot = GetComponent(localChar, 'HumanoidRootPart') or localChar:FindFirstChild('Head'); if not localRoot then return end
@@ -1243,7 +1298,7 @@ local function startSilentAimMobilePrediction()
     end
 
     local function IsValidTarget(player) return player ~= LocalPlayer and not IsTeammateGlobal(player) and player.Character and player.Character:FindFirstChild("HumanoidRootPart") end
-    
+
     local function GetClosestEnemy()
         local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"); if not myRoot then return nil end
         local maxDistance = 150; local closestTarget = nil; local shortestDistanceSq = maxDistance * maxDistance; local cameraPos = Camera.CFrame.Position; local viewportCenter = Camera.ViewportSize / 2
@@ -1266,7 +1321,7 @@ local function startSilentAimMobilePrediction()
         end
         return closestTarget
     end
-    
+
     local function GetPredictedPosition()
         if CurrentTarget then
             local predictionFactor = silentAimSettings.prediction / 100
@@ -1279,7 +1334,7 @@ local function startSilentAimMobilePrediction()
             return CFrame.new(Camera.CFrame.Position)
         end
     end
-    
+
     local mt = getrawmetatable(Mouse)
     originalMetaTableIndex = mt.__index
     setreadonly(mt, false)
@@ -1295,7 +1350,7 @@ local function startSilentAimMobilePrediction()
         return originalMetaTableIndex(t, k)
     end
     setreadonly(mt, true)
-    
+
     local renderConnection = RunService.RenderStepped:Connect(function()
         if silentAimFOVCircleMobile then
             silentAimFOVCircleMobile.Position = Camera.ViewportSize / 2; silentAimFOVCircleMobile.Visible = silentAimSettings.showFOV and getgenv().Aimbot_Enabled; silentAimFOVCircleMobile.Color = silentAimSettings.fovColor; silentAimFOVCircleMobile.Radius = silentAimSettings.fovSize
@@ -1329,8 +1384,8 @@ local function startSilentAimMobilePrediction()
                     end
                 else indicator.Visible = false end
             end
-        else 
-            for _, indicator in pairs(ESP_Indicators) do indicator.Visible = false end 
+        else
+            for _, indicator in pairs(ESP_Indicators) do indicator.Visible = false end
         end
     end)
     table.insert(silentAimMobileConnections, renderConnection)
@@ -1624,8 +1679,11 @@ SilentAimTab:CreateToggle({
         end
     end
 })
-SilentAimTab:CreateToggle({ Name = "Show FOV", Flag = "SilentAimShowFOV", CurrentValue = true, Callback = function(v) silentAimSettings.showFOV = v end })
 SilentAimTab:CreateToggle({ Name = "Show ESP Indicators", Flag = "ShowESPIndicators", CurrentValue = true, Callback = function(v) showESPIndicators = v end })
+SilentAimTab:CreateToggle({ Name = "Show FOV", Flag = "SilentAimShowFOV", CurrentValue = true, Callback = function(v) silentAimSettings.showFOV = v end })
+SilentAimTab:CreateToggle({ Name = "FOV Follow Mouse", Flag = "SAFovFollowMouse", CurrentValue = false, Callback = function(v) saFovFollowMouse = v end })
+SilentAimTab:CreateToggle({ Name = "Block Shoot", Flag = "SABlockShootNormal", CurrentValue = false, Callback = function(v) saBlockShootNormal = v; if not v and activeWeapon then SetWeaponScriptsDisabled(activeWeapon, false) end end })
+SilentAimTab:CreateToggle({ Name = "Block Shoot Inverted", Flag = "SABlockShootInverted", CurrentValue = false, Callback = function(v) saBlockShootInverted = v; if not v and activeWeapon then SetWeaponScriptsDisabled(activeWeapon, false) end end })
 SilentAimTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(255, 255, 255), Flag = "SilentAimFOVColor", Callback = function(v) silentAimSettings.fovColor = v; SilentAimFOV.Color = v end })
 SilentAimTab:CreateDropdown({
     Name = "Target Part",
@@ -1715,15 +1773,11 @@ VisualTab:CreateKeybind({
         espEnabled = not espEnabled
         if espEnabled then
             for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and p.Character then
-                    applyESP(p, p.Character)
-                end
+                if p ~= LocalPlayer and p.Character then applyESP(p, p.Character) end
             end
         else
             for _, p in ipairs(Players:GetPlayers()) do
-                if p.Character then
-                    removeESP(p.Character)
-                end
+                if p.Character then removeESP(p.Character) end
             end
         end
         if window.Flags["HighlightsEnabled"] then
@@ -1741,15 +1795,11 @@ VisualTab:CreateToggle({
         espEnabled = v
         if v then
             for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and p.Character then
-                    applyESP(p, p.Character)
-                end
+                if p ~= LocalPlayer and p.Character then applyESP(p, p.Character) end
             end
         else
             for _, p in ipairs(Players:GetPlayers()) do
-                if p.Character then
-                    removeESP(p.Character)
-                end
+                if p.Character then removeESP(p.Character) end
             end
         end
     end
@@ -1808,9 +1858,10 @@ createTPToggle("3v3", "TP_Right3v3_2", CFrame.new(-237, 241, 33))
 createTPToggle("4v4", "TP_Right4v4_1", CFrame.new(-229, 241, 34))
 createTPToggle("4v4", "TP_Right4v4_2", CFrame.new(-243, 69, 33))
 
-ExtraTab:CreateSection("Extra Features")
+ExtraTab:CreateSection("Spectator")
 ExtraTab:CreateToggle({ Name = "Spectate Perimeter", Flag = "PerimeterSpectate", CurrentValue = false, Callback = function(v) perimeterEnabled = v; if v then startPerimeter() else stopPerimeter() end end })
 
+ExtraTab:CreateSection("Weapon Crates")
 local selectedBox = nil
 ExtraTab:CreateDropdown({
     Name = "Select Box",
@@ -1827,19 +1878,24 @@ ExtraTab:CreateButton({ Name = "Open Selected Box", Callback = function()
     end
 end })
 
+ExtraTab:CreateSection("Auto Shoot")
 ExtraTab:CreateToggle({ Name = "Auto Shoot", Flag = "AutoShoot", CurrentValue = false, Callback = function(v) SetAutoShootState(v) end })
+ExtraTab:CreateToggle({ Name = "Show FOV", Flag = "AutoShootShowFOV", CurrentValue = true, Callback = function(v) autoShootConfig.showFOV = v end })
+ExtraTab:CreateToggle({ Name = "FOV Follow Mouse", Flag = "ASFovFollowMouse", CurrentValue = false, Callback = function(v) asFovFollowMouse = v end })
+ExtraTab:CreateToggle({ Name = "Block Shoot", Flag = "ASBlockShootNormal", CurrentValue = false, Callback = function(v) asBlockShootNormal = v; if not v and activeWeapon then SetWeaponScriptsDisabled(activeWeapon, false) end end })
+ExtraTab:CreateToggle({ Name = "Block Shoot Inverted", Flag = "ASBlockShootInverted", CurrentValue = false, Callback = function(v) asBlockShootInverted = v; if not v and activeWeapon then SetWeaponScriptsDisabled(activeWeapon, false) end end })
 ExtraTab:CreateDropdown({
     Name = "Auto Shoot Mode",
-    Options = {"Pantalla Completa", "FOV"},
-    CurrentOption = "Pantalla Completa",
+    Options = {"Full Screen", "FOV"},
+    CurrentOption = "Full Screen",
     Flag = "AutoShootMode",
     Callback = function(v) autoShootConfig.mode = v end
 })
-ExtraTab:CreateToggle({ Name = "Show FOV", Flag = "AutoShootShowFOV", CurrentValue = true, Callback = function(v) autoShootConfig.showFOV = v end })
 ExtraTab:CreateSlider({ Name = "FOV Size", Range = {50, 500}, Increment = 10, CurrentValue = 100, Flag = "AutoShootFOVSize", Callback = function(v) autoShootConfig.fovSize = v end })
 ExtraTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(255, 255, 255), Flag = "AutoShootFOVColor", Callback = function(v) autoShootConfig.fovColor = v end })
 ExtraTab:CreateSlider({ Name = "Shoot Delay", Range = {0.01, 3}, Increment = 0.01, CurrentValue = 0.08, Flag = "ShootDelay", Callback = function(v) autoShootDelay = v end })
 
+ExtraTab:CreateSection("Invisibility")
 ExtraTab:CreateToggle({ Name = "Auto-Give Cloak", Flag = "AutoGiveCloak", CurrentValue = false, Callback = function(v) AutoGiveCloak = v end })
 ExtraTab:CreateButton({ Name = "Get Cloak", Callback = function() GiveCloakTool() end })
 ExtraTab:CreateButton({ Name = "Remove Cloak", Callback = function()
@@ -1847,6 +1903,7 @@ ExtraTab:CreateButton({ Name = "Remove Cloak", Callback = function()
     if LocalPlayer.Character then local t = LocalPlayer.Character:FindFirstChild('Invisibility Cloak'); if t then t:Destroy() end end
 end })
 
+ExtraTab:CreateSection("Player Inventory")
 local selectedInvPlayer = nil
 local function getPlayerNames()
     local list = {}
@@ -1889,8 +1946,19 @@ aimbotConnection = RunService.RenderStepped:Connect(function()
         end
     end
     SilentAimFOV.Visible = silentAimSettings.showFOV and silentAimNoFailEnabled
+    if saFovFollowMouse and silentAimNoFailEnabled then
+        SilentAimFOV.Position = UserInputService:GetMouseLocation()
+    else
+        SilentAimFOV.Position = workspace.CurrentCamera.ViewportSize / 2
+    end
+    SilentAimFOV.Radius = silentAimSettings.fovSize
+    SilentAimFOV.Color = silentAimSettings.fovColor
     autoShootFOVCircle.Visible = AutoShootEnabled and autoShootConfig.showFOV and autoShootConfig.mode == "FOV"
-    autoShootFOVCircle.Position = workspace.CurrentCamera.ViewportSize / 2
+    if asFovFollowMouse and AutoShootEnabled then
+        autoShootFOVCircle.Position = UserInputService:GetMouseLocation()
+    else
+        autoShootFOVCircle.Position = workspace.CurrentCamera.ViewportSize / 2
+    end
     autoShootFOVCircle.Radius = autoShootConfig.fovSize
     autoShootFOVCircle.Color = autoShootConfig.fovColor
 end)
