@@ -555,6 +555,7 @@ end
 
 local aimbotState = { enabled = false, fovType = "Limited FOV", fovSize = 100, fovColor = Color3.fromRGB(128, 0, 128), smoothness = 1, targetPart = "Head", showFOV = false, visibilityCheck = false, onlyGun = false }
 local silentAimSettings = { fovSize = 100, showFOV = true, fovColor = Color3.fromRGB(255, 255, 255), wallCheck = false, prediction = 80 }
+local silentAimMode = "Full Screen"
 local aimbotConnection
 local FOVring
 local SilentAimFOV
@@ -1099,7 +1100,7 @@ local function PerformShot()
     if not silentAimNoFailEnabled then return false end
     if not IsWeaponReady() then return false end
     local fovCenter = saFovFollowMouse and UserInputService:GetMouseLocation() or (workspace.CurrentCamera.ViewportSize / 2)
-    local fovRadius = silentAimSettings.fovSize
+    local fovRadius = silentAimMode == "FOV" and silentAimSettings.fovSize or nil
     local target, score = GetBestTarget(fovRadius, fovCenter)
     if not target or score < 25 then return false end
     if not CanShootTarget(target) then return false end
@@ -1173,17 +1174,23 @@ RunService.Heartbeat:Connect(function()
     if not anyBlockActive then return end
     if not activeWeapon or not activeWeapon.Parent then return end
     local enemyVisible = false
-    if silentAimNoFailEnabled then
-        local fovCenter = saFovFollowMouse and UserInputService:GetMouseLocation() or workspace.CurrentCamera.ViewportSize / 2
-        enemyVisible = CheckAnyEnemyVisible(silentAimSettings.fovSize, fovCenter)
-    elseif AutoShootEnabled then
-        local fovCenter = asFovFollowMouse and UserInputService:GetMouseLocation() or workspace.CurrentCamera.ViewportSize / 2
-        enemyVisible = CheckAnyEnemyVisible(autoShootConfig.fovSize, fovCenter)
-    else
-        enemyVisible = CheckAnyEnemyVisible()
+    if saBlockShootInverted or asBlockShootInverted then
+        if silentAimNoFailEnabled then
+            local fovCenter = saFovFollowMouse and UserInputService:GetMouseLocation() or workspace.CurrentCamera.ViewportSize / 2
+            if silentAimMode == "FOV" then
+                enemyVisible = CheckAnyEnemyVisible(silentAimSettings.fovSize, fovCenter)
+            else
+                enemyVisible = CheckAnyEnemyVisible()
+            end
+        elseif AutoShootEnabled then
+            local fovCenter = asFovFollowMouse and UserInputService:GetMouseLocation() or workspace.CurrentCamera.ViewportSize / 2
+            enemyVisible = CheckAnyEnemyVisible(autoShootConfig.fovSize, fovCenter)
+        else
+            enemyVisible = CheckAnyEnemyVisible()
+        end
     end
     local shouldDisable = false
-    if (saBlockShootNormal or asBlockShootNormal) and not enemyVisible then shouldDisable = true end
+    if saBlockShootNormal or asBlockShootNormal then shouldDisable = true end
     if (saBlockShootInverted or asBlockShootInverted) and enemyVisible then shouldDisable = true end
     SetWeaponScriptsDisabled(activeWeapon, shouldDisable)
 end)
@@ -1222,6 +1229,7 @@ local AutoShootEnabled = false; local AutoShootConnection; local autoShootDelay 
 local autoShootFOVCircle = Drawing.new("Circle")
 autoShootFOVCircle.Visible = false; autoShootFOVCircle.Thickness = 2; autoShootFOVCircle.Color = Color3.fromRGB(255, 255, 255); autoShootFOVCircle.Filled = false; autoShootFOVCircle.Radius = 100; autoShootFOVCircle.Position = workspace.CurrentCamera.ViewportSize / 2
 local autoShootConfig = { mode = "Full Screen", showFOV = true, fovSize = 100, fovColor = Color3.fromRGB(255, 255, 255) }
+local autoShootTargetPart = "Head"
 
 local function IsVisibleFromWeapon(weaponHandle, targetChar)
     if not weaponHandle or not targetChar then return false end
@@ -1236,6 +1244,8 @@ end
 local function PerformAutoShoot()
     if not AutoShootEnabled then return end
     local weapon = GetCurrentWeapon(); if not weapon then return end
+    local prevSilentPart = silentAimTargetPart
+    silentAimTargetPart = autoShootTargetPart
     local target, score
     local fovCenter = asFovFollowMouse and UserInputService:GetMouseLocation() or (workspace.CurrentCamera.ViewportSize / 2)
     if autoShootConfig.mode == "FOV" then
@@ -1243,12 +1253,13 @@ local function PerformAutoShoot()
     else
         target, score = GetBestTarget()
     end
+    silentAimTargetPart = prevSilentPart
     if not target or score < 25 then return end
     local localChar = LocalPlayer.Character; if not localChar then return end
     local localRoot = GetComponent(localChar, 'HumanoidRootPart') or localChar:FindFirstChild('Head'); if not localRoot then return end
     if not CanShootTarget(target) then return end
     local targetChar = target.Character; if not targetChar then return end
-    local targetPart = targetChar:FindFirstChild(silentAimTargetPart)
+    local targetPart = targetChar:FindFirstChild(autoShootTargetPart)
     if not targetPart then targetPart = targetChar:FindFirstChild("HumanoidRootPart") end
     local targetHumanoid = GetComponent(targetChar, 'Humanoid'); if not targetPart or not targetHumanoid then return end
     local handle = GetComponent(weapon, 'Handle') or weapon; if handle and not IsVisibleFromWeapon(handle, targetChar) then return end
@@ -1301,7 +1312,7 @@ local function startSilentAimMobilePrediction()
 
     local function GetClosestEnemy()
         local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"); if not myRoot then return nil end
-        local maxDistance = 150; local closestTarget = nil; local shortestDistanceSq = maxDistance * maxDistance; local cameraPos = Camera.CFrame.Position; local viewportCenter = Camera.ViewportSize / 2
+        local maxDist = 150; local closestTarget = nil; local shortestDistanceSq = maxDist * maxDist; local cameraPos = Camera.CFrame.Position; local viewportCenter = Camera.ViewportSize / 2
         for _, player in ipairs(Players:GetPlayers()) do
             if IsValidTarget(player) then
                 local targetPart = player.Character:FindFirstChild(silentAimTargetPart)
@@ -1313,8 +1324,10 @@ local function startSilentAimMobilePrediction()
                     if rayResult and not rayResult.Instance:IsDescendantOf(player.Character) then continue end
                 end
                 local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position); if not onScreen then continue end
-                local direction = (targetPart.Position - cameraPos).Unit; if direction:Dot(Camera.CFrame.LookVector) <= 0 then continue end
-                local distanceFromCenter = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude; if distanceFromCenter > silentAimSettings.fovSize then continue end
+                local dir = (targetPart.Position - cameraPos).Unit; if dir:Dot(Camera.CFrame.LookVector) <= 0 then continue end
+                if silentAimMode == "FOV" then
+                    local distanceFromCenter = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude; if distanceFromCenter > silentAimSettings.fovSize then continue end
+                end
                 local distSq = (targetPart.Position - myRoot.Position).Magnitude ^ 2
                 if distSq < shortestDistanceSq then shortestDistanceSq = distSq; closestTarget = targetPart end
             end
@@ -1353,7 +1366,7 @@ local function startSilentAimMobilePrediction()
 
     local renderConnection = RunService.RenderStepped:Connect(function()
         if silentAimFOVCircleMobile then
-            silentAimFOVCircleMobile.Position = Camera.ViewportSize / 2; silentAimFOVCircleMobile.Visible = silentAimSettings.showFOV and getgenv().Aimbot_Enabled; silentAimFOVCircleMobile.Color = silentAimSettings.fovColor; silentAimFOVCircleMobile.Radius = silentAimSettings.fovSize
+            silentAimFOVCircleMobile.Position = Camera.ViewportSize / 2; silentAimFOVCircleMobile.Visible = silentAimSettings.showFOV and getgenv().Aimbot_Enabled and silentAimMode == "FOV"; silentAimFOVCircleMobile.Color = silentAimSettings.fovColor; silentAimFOVCircleMobile.Radius = silentAimSettings.fovSize
         end
         if not getgenv().Aimbot_Enabled then
             CurrentTarget = nil; Crosshair.Visible = false; UserInputService.MouseBehavior = Enum.MouseBehavior.Default; UserInputService.MouseIconEnabled = true; for _, indicator in pairs(ESP_Indicators) do indicator.Visible = false end
@@ -1599,9 +1612,6 @@ AimbotTab:CreateDropdown({
     Flag = "AimbotFOVType",
     Callback = function(v) aimbotState.fovType = v end
 })
-AimbotTab:CreateSlider({ Name = "Smoothness", Range = {0.1, 1}, Increment = 0.05, CurrentValue = 1, Flag = "AimbotSmoothness", Callback = function(v) aimbotState.smoothness = v end })
-AimbotTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(128, 0, 128), Flag = "AimbotFOVColor", Callback = function(v) aimbotState.fovColor = v; if FOVring then FOVring.Color = v end end })
-AimbotTab:CreateSlider({ Name = "FOV Size", Range = {50, 500}, Increment = 10, CurrentValue = 100, Flag = "AimbotFOVSize", Callback = function(v) aimbotState.fovSize = v; if FOVring then FOVring.Radius = v end end })
 AimbotTab:CreateDropdown({
     Name = "Target Part",
     Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"},
@@ -1609,6 +1619,9 @@ AimbotTab:CreateDropdown({
     Flag = "AimbotTargetPart",
     Callback = function(v) aimbotState.targetPart = v end
 })
+AimbotTab:CreateSlider({ Name = "Smoothness", Range = {0.1, 1}, Increment = 0.05, CurrentValue = 1, Flag = "AimbotSmoothness", Callback = function(v) aimbotState.smoothness = v end })
+AimbotTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(128, 0, 128), Flag = "AimbotFOVColor", Callback = function(v) aimbotState.fovColor = v; if FOVring then FOVring.Color = v end end })
+AimbotTab:CreateSlider({ Name = "FOV Size", Range = {20, 500}, Increment = 10, CurrentValue = 100, Flag = "AimbotFOVSize", Callback = function(v) aimbotState.fovSize = v; if FOVring then FOVring.Radius = v end end })
 AimbotTab:CreateToggle({ Name = "Wall Check", Flag = "AimbotVisibilityCheck", CurrentValue = false, Callback = function(v) aimbotState.visibilityCheck = v end })
 
 SilentAimTab:CreateKeybind({
@@ -1686,14 +1699,21 @@ SilentAimTab:CreateToggle({ Name = "Block Shoot", Flag = "SABlockShootNormal", C
 SilentAimTab:CreateToggle({ Name = "Block Shoot Inverted", Flag = "SABlockShootInverted", CurrentValue = false, Callback = function(v) saBlockShootInverted = v; if not v and activeWeapon then SetWeaponScriptsDisabled(activeWeapon, false) end end })
 SilentAimTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(255, 255, 255), Flag = "SilentAimFOVColor", Callback = function(v) silentAimSettings.fovColor = v; SilentAimFOV.Color = v end })
 SilentAimTab:CreateDropdown({
+    Name = "FOV Mode",
+    Options = {"Full Screen", "FOV"},
+    CurrentOption = "Full Screen",
+    Flag = "SilentAimMode",
+    Callback = function(v) silentAimMode = v end
+})
+SilentAimTab:CreateDropdown({
     Name = "Target Part",
     Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"},
     CurrentOption = "Head",
     Flag = "SilentAimTargetPart",
     Callback = function(v) silentAimTargetPart = v end
 })
-SilentAimTab:CreateSlider({ Name = "FOV Size", Range = {50, 500}, Increment = 10, CurrentValue = 100, Flag = "SilentAimFOVSize", Callback = function(v) silentAimSettings.fovSize = v; SilentAimFOV.Radius = v end })
-SilentAimTab:CreateSlider({ Name = "Prediction", Range = {1, 100}, Increment = 1, CurrentValue = 80, Flag = "ClickShootPrediction", Callback = function(v) silentAimConfig.predictionStrength = v / 100; silentAimSettings.prediction = v end })
+SilentAimTab:CreateSlider({ Name = "FOV Size", Range = {20, 500}, Increment = 10, CurrentValue = 100, Flag = "SilentAimFOVSize", Callback = function(v) silentAimSettings.fovSize = v; SilentAimFOV.Radius = v end })
+SilentAimTab:CreateSlider({ Name = "Prediction", Range = {20, 100}, Increment = 1, CurrentValue = 80, Flag = "ClickShootPrediction", Callback = function(v) silentAimConfig.predictionStrength = v / 100; silentAimSettings.prediction = v end })
 SilentAimTab:CreateToggle({ Name = "Wall Check", Flag = "SilentAimWallCheck", CurrentValue = false, Callback = function(v) silentAimSettings.wallCheck = v end })
 
 HitboxTab:CreateKeybind({
@@ -1764,7 +1784,7 @@ HitboxTab:CreateToggle({
 HitboxTab:CreateToggle({ Name = "Hitbox (Gun)", Flag = "HitboxGun", CurrentValue = false, Callback = function(v) HitboxSettings.GunEnabled = v end })
 HitboxTab:CreateToggle({ Name = "Hitbox (Knife)", Flag = "HitboxKnife", CurrentValue = false, Callback = function(v) HitboxSettings.KnifeEnabled = v end })
 HitboxTab:CreateToggle({ Name = "Visibility Check", Flag = "HitboxAntiWall", CurrentValue = false, Callback = function(v) HitboxSettings.AntiWall = v end })
-HitboxTab:CreateSlider({ Name = "Size", Range = {1, 25}, Increment = 1, CurrentValue = 12, Flag = "HitboxSize", Callback = function(v) HitboxSettings.Size = v end })
+HitboxTab:CreateSlider({ Name = "Size", Range = {20, 25}, Increment = 1, CurrentValue = 12, Flag = "HitboxSize", Callback = function(v) HitboxSettings.Size = v end })
 
 VisualTab:CreateKeybind({
     Name = "Toggle Highlights",
@@ -1891,7 +1911,14 @@ ExtraTab:CreateDropdown({
     Flag = "AutoShootMode",
     Callback = function(v) autoShootConfig.mode = v end
 })
-ExtraTab:CreateSlider({ Name = "FOV Size", Range = {50, 500}, Increment = 10, CurrentValue = 100, Flag = "AutoShootFOVSize", Callback = function(v) autoShootConfig.fovSize = v end })
+ExtraTab:CreateDropdown({
+    Name = "Auto Shoot Target Part",
+    Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"},
+    CurrentOption = "Head",
+    Flag = "AutoShootTargetPart",
+    Callback = function(v) autoShootTargetPart = v end
+})
+ExtraTab:CreateSlider({ Name = "FOV Size", Range = {20, 500}, Increment = 10, CurrentValue = 100, Flag = "AutoShootFOVSize", Callback = function(v) autoShootConfig.fovSize = v end })
 ExtraTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(255, 255, 255), Flag = "AutoShootFOVColor", Callback = function(v) autoShootConfig.fovColor = v end })
 ExtraTab:CreateSlider({ Name = "Shoot Delay", Range = {0.01, 3}, Increment = 0.01, CurrentValue = 0.08, Flag = "ShootDelay", Callback = function(v) autoShootDelay = v end })
 
@@ -1945,7 +1972,7 @@ aimbotConnection = RunService.RenderStepped:Connect(function()
             FOVring.Visible = false
         end
     end
-    SilentAimFOV.Visible = silentAimSettings.showFOV and silentAimNoFailEnabled
+    SilentAimFOV.Visible = silentAimSettings.showFOV and silentAimNoFailEnabled and silentAimMode == "FOV"
     if saFovFollowMouse and silentAimNoFailEnabled then
         SilentAimFOV.Position = UserInputService:GetMouseLocation()
     else
