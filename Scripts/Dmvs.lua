@@ -1784,7 +1784,7 @@ HitboxTab:CreateToggle({
 HitboxTab:CreateToggle({ Name = "Hitbox (Gun)", Flag = "HitboxGun", CurrentValue = false, Callback = function(v) HitboxSettings.GunEnabled = v end })
 HitboxTab:CreateToggle({ Name = "Hitbox (Knife)", Flag = "HitboxKnife", CurrentValue = false, Callback = function(v) HitboxSettings.KnifeEnabled = v end })
 HitboxTab:CreateToggle({ Name = "Visibility Check", Flag = "HitboxAntiWall", CurrentValue = false, Callback = function(v) HitboxSettings.AntiWall = v end })
-HitboxTab:CreateSlider({ Name = "Size", Range = {20, 25}, Increment = 1, CurrentValue = 12, Flag = "HitboxSize", Callback = function(v) HitboxSettings.Size = v end })
+HitboxTab:CreateSlider({ Name = "Size", Range = {1, 25}, Increment = 1, CurrentValue = 12, Flag = "HitboxSize", Callback = function(v) HitboxSettings.Size = v end })
 
 VisualTab:CreateKeybind({
     Name = "Toggle Highlights",
