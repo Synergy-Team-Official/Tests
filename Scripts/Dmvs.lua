@@ -556,6 +556,7 @@ end
 local aimbotState = { enabled = false, fovType = "Limited FOV", fovSize = 100, fovColor = Color3.fromRGB(128, 0, 128), smoothness = 1, targetPart = "Head", showFOV = false, visibilityCheck = false, onlyGun = false }
 local silentAimSettings = { fovSize = 100, showFOV = true, fovColor = Color3.fromRGB(255, 255, 255), wallCheck = false, prediction = 80 }
 local silentAimMode = "Full Screen"
+local silentAimOnlyGun = false
 local aimbotConnection
 local FOVring
 local SilentAimFOV
@@ -1032,6 +1033,9 @@ local function CalculateTargetScore(player)
 end
 
 local function GetBestTarget(fovRadius, fovCenter)
+    if silentAimOnlyGun then
+        if not GetCurrentWeapon() then return nil, 0 end
+    end
     local localChar = LocalPlayer.Character
     if not localChar or not localChar:IsDescendantOf(workspace) then return nil, 0 end
     local enemies = {}
@@ -1098,6 +1102,10 @@ local function PerformShot()
     local currentTime = tick()
     if (currentTime - lastShotTime) < shotDelay then return false end
     if not silentAimNoFailEnabled then return false end
+    if silentAimOnlyGun then
+        local currentGun = GetCurrentWeapon()
+        if not currentGun then return false end
+    end
     if not IsWeaponReady() then return false end
     local fovCenter = saFovFollowMouse and UserInputService:GetMouseLocation() or (workspace.CurrentCamera.ViewportSize / 2)
     local fovRadius = silentAimMode == "FOV" and silentAimSettings.fovSize or nil
@@ -1311,6 +1319,16 @@ local function startSilentAimMobilePrediction()
     local function IsValidTarget(player) return player ~= LocalPlayer and not IsTeammateGlobal(player) and player.Character and player.Character:FindFirstChild("HumanoidRootPart") end
 
     local function GetClosestEnemy()
+        if silentAimOnlyGun then
+            local char = LocalPlayer.Character
+            if char then
+                local tool = char:FindFirstChildOfClass("Tool")
+                local isGun = tool and tool:FindFirstChild("showBeam") and tool.showBeam:IsA("RemoteEvent")
+                if not isGun then return nil end
+            else
+                return nil
+            end
+        end
         local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"); if not myRoot then return nil end
         local maxDist = 150; local closestTarget = nil; local shortestDistanceSq = maxDist * maxDist; local cameraPos = Camera.CFrame.Position; local viewportCenter = Camera.ViewportSize / 2
         for _, player in ipairs(Players:GetPlayers()) do
@@ -1373,15 +1391,15 @@ local function startSilentAimMobilePrediction()
             return
         end
         if not IsInRound() then
-            CurrentTarget = nil; UserInputService.MouseBehavior = Enum.MouseBehavior.Default; UserInputService.MouseIconEnabled = true; Crosshair.Visible = true; Crosshair.Position = UDim2.new(0.5, 0, 0.5, 0); for _, indicator in pairs(ESP_Indicators) do indicator.Visible = false end
+            CurrentTarget = nil; UserInputService.MouseBehavior = Enum.MouseBehavior.Default; UserInputService.MouseIconEnabled = true; Crosshair.Visible = showESPIndicators and true or false; Crosshair.Position = UDim2.new(0.5, 0, 0.5, 0); for _, indicator in pairs(ESP_Indicators) do indicator.Visible = false end
             return
         end
         CurrentTarget = GetClosestEnemy()
         if CurrentTarget then
             IsAiming = false; UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter; UserInputService.MouseIconEnabled = false
-            local screenPos, onScreen = Camera:WorldToViewportPoint(GetPredictedPosition().Position); Crosshair.Visible = true; Crosshair.Position = UDim2.new(0, screenPos.X, 0, screenPos.Y)
+            local screenPos, onScreen = Camera:WorldToViewportPoint(GetPredictedPosition().Position); Crosshair.Visible = showESPIndicators and true or false; Crosshair.Position = UDim2.new(0, screenPos.X, 0, screenPos.Y)
         else
-            IsAiming = true; UserInputService.MouseBehavior = Enum.MouseBehavior.Default; UserInputService.MouseIconEnabled = true; Crosshair.Visible = true; Crosshair.Position = UDim2.new(0.5, 0, 0.5, 0)
+            IsAiming = true; UserInputService.MouseBehavior = Enum.MouseBehavior.Default; UserInputService.MouseIconEnabled = true; Crosshair.Visible = showESPIndicators and true or false; Crosshair.Position = UDim2.new(0.5, 0, 0.5, 0)
         end
         if showESPIndicators then
             for _, player in ipairs(Players:GetPlayers()) do
@@ -1691,6 +1709,12 @@ SilentAimTab:CreateToggle({
             stopSilentAimMobilePrediction()
         end
     end
+})
+SilentAimTab:CreateToggle({
+    Name = "Only Gun",
+    Flag = "SilentAimOnlyGun",
+    CurrentValue = false,
+    Callback = function(v) silentAimOnlyGun = v end
 })
 SilentAimTab:CreateToggle({ Name = "Show ESP Indicators", Flag = "ShowESPIndicators", CurrentValue = true, Callback = function(v) showESPIndicators = v end })
 SilentAimTab:CreateToggle({ Name = "Show FOV", Flag = "SilentAimShowFOV", CurrentValue = true, Callback = function(v) silentAimSettings.showFOV = v end })
