@@ -329,7 +329,7 @@ Players.PlayerRemoving:Connect(function(player) if highlights[player] then highl
 local espUpdateInterval = 0.1; local lastUpdate = tick()
 RunService.RenderStepped:Connect(function() local now = tick(); if now - lastUpdate >= espUpdateInterval then pcall(updateESP); lastUpdate = now end end)
 
-local SynergyUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Synergy-Hub-Official/Scripts/refs/heads/main/SynergyUI.lua"))()
+local SynergyUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Synergy-Hub-Official/SynergyUI-Lib/refs/heads/main/SRC/source.lua"))()
 local Window = SynergyUI:CreateWindow({
     Title = "Synergy Hub - Da Hood",
     AccentColor = Color3.fromRGB(0, 255, 100),
