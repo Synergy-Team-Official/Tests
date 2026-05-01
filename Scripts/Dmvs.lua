@@ -2162,7 +2162,10 @@ VisualTab:CreateColorPicker({
 
 local TradeItemRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("TradeItem")
 if not TradeItemRemote then
-    TradeItemRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TradeItem")
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    if remotes then
+        TradeItemRemote = remotes:FindFirstChild("TradeItem")
+    end
 end
 
 local SkinsFolder = LocalPlayer:FindFirstChild("SkinsFolder")
@@ -2201,10 +2204,15 @@ end
 local function GetTradePartner()
     if not IsTradeUIVisible() then return nil end
     local PlayerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not PlayerGui then return nil end
     local Main = PlayerGui:FindFirstChild("Main")
+    if not Main then return nil end
     local MainTradingFrame = Main:FindFirstChild("MainTradingFrame")
-    local nameText = MainTradingFrame.Slots.TradingPlayerName.Text
-    local partnerName = nameText:match("@(.+)%)")
+    if not MainTradingFrame or not MainTradingFrame.Slots then return nil end
+    local nameText = MainTradingFrame.Slots:FindFirstChild("TradingPlayerName")
+    if not nameText then return nil end
+    local text = nameText.Text
+    local partnerName = text:match("@(.+)%)")
     if partnerName then
         return Players:FindFirstChild(partnerName)
     end
@@ -2212,14 +2220,18 @@ local function GetTradePartner()
 end
 
 local function SendAddRequest(partner, weapon)
-    if partner and weapon then
-        TradeItemRemote:InvokeServer("ADD_TO_TRADE", partner, weapon, { OurItems = { weapon }, TheirItems = {} })
+    if partner and weapon and TradeItemRemote then
+        pcall(function()
+            TradeItemRemote:InvokeServer("ADD_TO_TRADE", partner, weapon, { OurItems = { weapon }, TheirItems = {} })
+        end)
     end
 end
 
 local function SendRemoveRequest(partner, weapon)
-    if partner and weapon then
-        TradeItemRemote:InvokeServer("REMOVE_FROM_TRADE", partner, weapon, { OurItems = { weapon }, TheirItems = {} })
+    if partner and weapon and TradeItemRemote then
+        pcall(function()
+            TradeItemRemote:InvokeServer("REMOVE_FROM_TRADE", partner, weapon, { OurItems = { weapon }, TheirItems = {} })
+        end)
     end
 end
 
@@ -2227,24 +2239,23 @@ local selectedWeapon1 = nil
 local selectedWeapon2 = nil
 local selectedWeapon3 = nil
 
-local function RefreshWeaponOptions(dropdownObj)
-    local weapons = GetWeaponList()
-    local optionsWithCount = {}
-    for _, w in ipairs(weapons) do
-        table.insert(optionsWithCount, w .. " (x" .. GetWeaponCount(w) .. ")")
+local function GetSimpleWeaponList()
+    local weapons = {}
+    for _, child in pairs(SkinsFolder:GetChildren()) do
+        table.insert(weapons, child.Name)
     end
-    dropdownObj:SetOptions(optionsWithCount)
+    table.sort(weapons)
+    return weapons
 end
 
 local weaponDropdown1 = TradingTab:CreateDropdown({
     Name = "Arma 1",
-    Options = {},
+    Options = GetSimpleWeaponList(),
     CurrentOption = "",
     Flag = "TradeWeapon1",
     Callback = function(v)
         if v and v ~= "" then
-            local clean = v:match("^(.-) %(x") or v
-            selectedWeapon1 = clean
+            selectedWeapon1 = v
         else
             selectedWeapon1 = nil
         end
@@ -2253,13 +2264,12 @@ local weaponDropdown1 = TradingTab:CreateDropdown({
 
 local weaponDropdown2 = TradingTab:CreateDropdown({
     Name = "Arma 2",
-    Options = {},
+    Options = GetSimpleWeaponList(),
     CurrentOption = "",
     Flag = "TradeWeapon2",
     Callback = function(v)
         if v and v ~= "" then
-            local clean = v:match("^(.-) %(x") or v
-            selectedWeapon2 = clean
+            selectedWeapon2 = v
         else
             selectedWeapon2 = nil
         end
@@ -2268,13 +2278,12 @@ local weaponDropdown2 = TradingTab:CreateDropdown({
 
 local weaponDropdown3 = TradingTab:CreateDropdown({
     Name = "Arma 3",
-    Options = {},
+    Options = GetSimpleWeaponList(),
     CurrentOption = "",
     Flag = "TradeWeapon3",
     Callback = function(v)
         if v and v ~= "" then
-            local clean = v:match("^(.-) %(x") or v
-            selectedWeapon3 = clean
+            selectedWeapon3 = v
         else
             selectedWeapon3 = nil
         end
@@ -2282,12 +2291,13 @@ local weaponDropdown3 = TradingTab:CreateDropdown({
 })
 
 local function refreshAllDropdowns()
-    RefreshWeaponOptions(weaponDropdown1)
-    RefreshWeaponOptions(weaponDropdown2)
-    RefreshWeaponOptions(weaponDropdown3)
+    local weapons = GetSimpleWeaponList()
+    weaponDropdown1:SetOptions(weapons)
+    weaponDropdown2:SetOptions(weapons)
+    weaponDropdown3:SetOptions(weapons)
 end
 
-local refreshButton = TradingTab:CreateButton({
+TradingTab:CreateButton({
     Name = "Refrescar lista de armas",
     Callback = function()
         refreshAllDropdowns()
@@ -2313,7 +2323,7 @@ local function bulkOperation(isAdd)
     for _, weap in ipairs(weapons) do
         local qty = GetWeaponCount(weap)
         if qty > 0 then
-            for i = 1, qty do
+            for i = 1, math.min(qty, 10) do
                 task.spawn(function()
                     action(partner, weap)
                 end)
@@ -2336,8 +2346,12 @@ TradingTab:CreateButton({
     end
 })
 
-SkinsFolder.ChildAdded:Connect(refreshAllDropdowns)
-SkinsFolder.ChildRemoved:Connect(refreshAllDropdowns)
+local function onSkinsChanged()
+    refreshAllDropdowns()
+end
+
+SkinsFolder.ChildAdded:Connect(onSkinsChanged)
+SkinsFolder.ChildRemoved:Connect(onSkinsChanged)
 refreshAllDropdowns()
 
 ExtraTab:CreateSection("Teleports & Farm")
