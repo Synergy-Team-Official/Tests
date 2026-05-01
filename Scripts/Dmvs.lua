@@ -1311,6 +1311,83 @@ function SetAutoShootState(state)
     end
 end
 
+local triggerbotEnabled = false
+local triggerbotDelay = 0.05
+local triggerbotOnlyGun = true
+local lastTriggerShot = tick()
+local triggerbotConnection
+
+local function IsAlive(player)
+    local char = player.Character
+    if not char then return false end
+    local humanoid = char:FindFirstChild("Humanoid")
+    return humanoid and humanoid.Health > 0
+end
+
+local function GetPlayerUnderMouse()
+    local camera = workspace.CurrentCamera
+    local mousePos = UserInputService:GetMouseLocation()
+    local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {LocalPlayer.Character}
+    params.IgnoreWater = true
+    local hit = workspace:Raycast(ray.Origin, ray.Direction * 500, params)
+    if not hit then return nil end
+    local character = hit.Instance:FindFirstAncestorWhichIsA("Model")
+    if not character then return nil end
+    local player = Players:GetPlayerFromCharacter(character)
+    if not player then return nil end
+    return player, hit.Position
+end
+
+local function PerformTriggerShot()
+    if not triggerbotEnabled then return end
+    if triggerbotOnlyGun and not HasGunEquipped() then return end
+    local now = tick()
+    if now - lastTriggerShot < triggerbotDelay then return end
+    local targetPlayer, hitPoint = GetPlayerUnderMouse()
+    if not targetPlayer then return end
+    if targetPlayer == LocalPlayer then return end
+    if IsTeammateGlobal(targetPlayer) then return end
+    if not IsAlive(targetPlayer) then return end
+    local weapon = GetCurrentWeapon()
+    if not weapon then return end
+    local handle = weapon:FindFirstChild("Handle") or weapon
+    if not handle then return end
+    local direction = (hitPoint - handle.Position).Unit
+    local fireEvent = GetComponent(weapon, 'fire')
+    local beamEvent = GetComponent(weapon, 'showBeam')
+    local killEvent = GetComponent(weapon, 'kill')
+    local localBeam = ReplicatedStorage:FindFirstChild("BindableEvents") and ReplicatedStorage.BindableEvents:FindFirstChild('LocalBeam')
+    task.spawn(function()
+        if localBeam then localBeam:Fire(handle, hitPoint) end
+        if fireEvent then fireEvent:FireServer() end
+        if beamEvent then beamEvent:FireServer(hitPoint, handle.Position, handle) end
+        if killEvent then killEvent:FireServer(targetPlayer, direction, hitPoint) end
+    end)
+    lastTriggerShot = now
+end
+
+local function startTriggerbot()
+    if triggerbotConnection then return end
+    triggerbotConnection = RunService.RenderStepped:Connect(PerformTriggerShot)
+end
+
+local function stopTriggerbot()
+    if triggerbotConnection then triggerbotConnection:Disconnect(); triggerbotConnection = nil end
+end
+
+local function setTriggerbotState(state)
+    triggerbotEnabled = state
+    if state then
+        lastTriggerShot = tick()
+        startTriggerbot()
+    else
+        stopTriggerbot()
+    end
+end
+
 local silentAimMobilePredictionEnabled = false; local showESPIndicators = true; local silentAimMobileConnections = {}; local originalMetaTableIndex; local silentAimFOVCircleMobile = nil; local ESP_Indicators = {}
 
 local function RemoveESPIndicator(userId)
@@ -1472,7 +1549,7 @@ for _, v in pairs(corners) do
     maxX = math.max(maxX, v.X); maxY = math.max(maxY, v.Y); maxZ = math.max(maxZ, v.Z)
 end
 local HEIGHT = 12; local MARGIN = 3
-minY -= HEIGHT; maxY += HEIGHT; minX -= MARGIN; maxX += MARGIN; minZ -= MARGIN; maxZ += MARGIN
+minY = minY - HEIGHT; maxY = maxY + HEIGHT; minX = minX - MARGIN; maxX = maxX + MARGIN; minZ = minZ - MARGIN; maxZ = maxZ + MARGIN
 
 local function isInside(pos) return pos.X >= minX and pos.X <= maxX and pos.Y >= minY and pos.Y <= maxY and pos.Z >= minZ and pos.Z <= maxZ end
 
@@ -1609,9 +1686,10 @@ local window = SynergyUI:CreateWindow({
 local InfoTab = window:CreateTab("Information")
 local AimbotTab = window:CreateTab("Aimbot")
 local SilentAimTab = window:CreateTab("Silent Aim")
+local TriggerBotTab = window:CreateTab("Trigger Bot")
+local AutoShootTab = window:CreateTab("Auto Shoot")
 local HitboxTab = window:CreateTab("Hitbox")
 local VisualTab = window:CreateTab("ESP")
-local TPTab = window:CreateTab("TPs")
 local ExtraTab = window:CreateTab("Extra")
 
 InfoTab:CreateSection("Information")
@@ -1768,6 +1846,81 @@ SilentAimTab:CreateSlider({ Name = "FOV Size", Range = {20, 500}, Increment = 10
 SilentAimTab:CreateSlider({ Name = "Prediction", Range = {20, 100}, Increment = 1, CurrentValue = 100, Flag = "ClickShootPrediction", Callback = function(v) silentAimConfig.predictionStrength = v / 100; silentAimSettings.prediction = v end })
 SilentAimTab:CreateToggle({ Name = "Wall Check", Flag = "SilentAimWallCheck", CurrentValue = false, Callback = function(v) silentAimSettings.wallCheck = v end })
 
+TriggerBotTab:CreateKeybind({
+    Name = "Toggle Triggerbot",
+    Flag = "TriggerbotKeybind",
+    Callback = function()
+        local newState = not triggerbotEnabled
+        setTriggerbotState(newState)
+        if window.Flags["TriggerbotEnabled"] then
+            window.Flags["TriggerbotEnabled"]:Set(newState)
+        end
+    end
+})
+TriggerBotTab:CreateSection("Triggerbot Settings")
+TriggerBotTab:CreateToggle({
+    Name = "Enable Triggerbot",
+    Flag = "TriggerbotEnabled",
+    CurrentValue = false,
+    Callback = function(v)
+        setTriggerbotState(v)
+    end
+})
+TriggerBotTab:CreateToggle({
+    Name = "Only Gun",
+    Flag = "TriggerbotOnlyGun",
+    CurrentValue = true,
+    Callback = function(v)
+        triggerbotOnlyGun = v
+    end
+})
+TriggerBotTab:CreateSlider({
+    Name = "Reaction Time (seconds)",
+    Range = {0.01, 3},
+    Increment = 0.01,
+    CurrentValue = 0.05,
+    Flag = "TriggerbotDelay",
+    Callback = function(v)
+        triggerbotDelay = v
+        if triggerbotDelay < 0.01 then triggerbotDelay = 0.01 end
+    end
+})
+
+AutoShootTab:CreateKeybind({
+    Name = "Toggle Auto Shoot",
+    Flag = "AutoShootKeybind",
+    Callback = function()
+        local newV = not AutoShootEnabled
+        SetAutoShootState(newV)
+        if window.Flags["AutoShoot"] then
+            window.Flags["AutoShoot"]:Set(newV)
+        end
+    end
+})
+AutoShootTab:CreateSection("Auto Shoot")
+AutoShootTab:CreateToggle({ Name = "Auto Shoot", Flag = "AutoShoot", CurrentValue = false, Callback = function(v) SetAutoShootState(v) end })
+AutoShootTab:CreateToggle({ Name = "Show FOV", Flag = "AutoShootShowFOV", CurrentValue = true, Callback = function(v) autoShootConfig.showFOV = v end })
+AutoShootTab:CreateToggle({ Name = "FOV Follow Mouse", Flag = "ASFovFollowMouse", CurrentValue = false, Callback = function(v) asFovFollowMouse = v end })
+AutoShootTab:CreateToggle({ Name = "Block Shoot", Flag = "ASBlockShootNormal", CurrentValue = false, Callback = function(v) asBlockShootNormal = v; if not v and activeWeapon then SetWeaponScriptsDisabled(activeWeapon, false) end end })
+AutoShootTab:CreateToggle({ Name = "Block Shoot Inverted", Flag = "ASBlockShootInverted", CurrentValue = false, Callback = function(v) asBlockShootInverted = v; if not v and activeWeapon then SetWeaponScriptsDisabled(activeWeapon, false) end end })
+AutoShootTab:CreateDropdown({
+    Name = "Auto Shoot Mode",
+    Options = {"Full Screen", "FOV"},
+    CurrentOption = "Full Screen",
+    Flag = "AutoShootMode",
+    Callback = function(v) autoShootConfig.mode = v end
+})
+AutoShootTab:CreateDropdown({
+    Name = "Auto Shoot Target Part",
+    Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"},
+    CurrentOption = "Head",
+    Flag = "AutoShootTargetPart",
+    Callback = function(v) autoShootTargetPart = v end
+})
+AutoShootTab:CreateSlider({ Name = "FOV Size", Range = {20, 500}, Increment = 10, CurrentValue = 100, Flag = "AutoShootFOVSize", Callback = function(v) autoShootConfig.fovSize = v end })
+AutoShootTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(255, 255, 255), Flag = "AutoShootFOVColor", Callback = function(v) autoShootConfig.fovColor = v end })
+AutoShootTab:CreateSlider({ Name = "Shoot Delay", Range = {0.01, 3}, Increment = 0.01, CurrentValue = 0.08, Flag = "ShootDelay", Callback = function(v) autoShootDelay = v end })
+
 HitboxTab:CreateKeybind({
     Name = "Toggle Hitbox",
     Flag = "HitboxToggleKeybind",
@@ -1886,9 +2039,9 @@ VisualTab:CreateColorPicker({
     end
 })
 
-TPTab:CreateSection("Teleports & Farm")
-TPTab:CreateToggle({ Name = "Auto Farm Wins", Flag = "AutoFarm", CurrentValue = false, Callback = function(v) autoFarmEnabled = v; if v then startAutoFarm() else stopAutoFarm() end end })
-TPTab:CreateToggle({
+ExtraTab:CreateSection("Teleports & Farm")
+ExtraTab:CreateToggle({ Name = "Auto Farm Wins", Flag = "AutoFarm", CurrentValue = false, Callback = function(v) autoFarmEnabled = v; if v then startAutoFarm() else stopAutoFarm() end end })
+ExtraTab:CreateToggle({
     Name = "Auto Farm Kills",
     Flag = "AutoFarmKills",
     CurrentValue = false,
@@ -1902,11 +2055,11 @@ TPTab:CreateToggle({
         end
     end
 })
-TPTab:CreateToggle({ Name = "Anti AFK", Flag = "AntiAFK", CurrentValue = false, Callback = function(v) if v then startAntiAFK() else stopAntiAFK() end end })
+ExtraTab:CreateToggle({ Name = "Anti AFK", Flag = "AntiAFK", CurrentValue = false, Callback = function(v) if v then startAntiAFK() else stopAntiAFK() end end })
 
-TPTab:CreateSection("Left Side")
+ExtraTab:CreateSection("Left Side")
 local function createTPToggle(name, flag, cf)
-    TPTab:CreateToggle({
+    ExtraTab:CreateToggle({
         Name = name,
         Flag = flag,
         CurrentValue = false,
@@ -1928,7 +2081,7 @@ createTPToggle("3v3", "TP_Left3v3_2", CFrame.new(-250, 241, 2))
 createTPToggle("4v4", "TP_Left4v4_1", CFrame.new(-237, 241, 2))
 createTPToggle("4v4", "TP_Left4v4_2", CFrame.new(-229, 241, 2))
 
-TPTab:CreateSection("Right Side")
+ExtraTab:CreateSection("Right Side")
 createTPToggle("1v1", "TP_Right1v1_1", CFrame.new(-300, 241, 34))
 createTPToggle("1v1", "TP_Right1v1_2", CFrame.new(-292, 241, 34))
 createTPToggle("2v2", "TP_Right2v2_1", CFrame.new(-279, 241, 34))
@@ -1957,30 +2110,6 @@ ExtraTab:CreateButton({ Name = "Open Selected Box", Callback = function()
         if buyCase then buyCase:InvokeServer(selectedBox) end
     end
 end })
-
-ExtraTab:CreateSection("Auto Shoot")
-ExtraTab:CreateToggle({ Name = "Auto Shoot", Flag = "AutoShoot", CurrentValue = false, Callback = function(v) SetAutoShootState(v) end })
-ExtraTab:CreateToggle({ Name = "Show FOV", Flag = "AutoShootShowFOV", CurrentValue = true, Callback = function(v) autoShootConfig.showFOV = v end })
-ExtraTab:CreateToggle({ Name = "FOV Follow Mouse", Flag = "ASFovFollowMouse", CurrentValue = false, Callback = function(v) asFovFollowMouse = v end })
-ExtraTab:CreateToggle({ Name = "Block Shoot", Flag = "ASBlockShootNormal", CurrentValue = false, Callback = function(v) asBlockShootNormal = v; if not v and activeWeapon then SetWeaponScriptsDisabled(activeWeapon, false) end end })
-ExtraTab:CreateToggle({ Name = "Block Shoot Inverted", Flag = "ASBlockShootInverted", CurrentValue = false, Callback = function(v) asBlockShootInverted = v; if not v and activeWeapon then SetWeaponScriptsDisabled(activeWeapon, false) end end })
-ExtraTab:CreateDropdown({
-    Name = "Auto Shoot Mode",
-    Options = {"Full Screen", "FOV"},
-    CurrentOption = "Full Screen",
-    Flag = "AutoShootMode",
-    Callback = function(v) autoShootConfig.mode = v end
-})
-ExtraTab:CreateDropdown({
-    Name = "Auto Shoot Target Part",
-    Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"},
-    CurrentOption = "Head",
-    Flag = "AutoShootTargetPart",
-    Callback = function(v) autoShootTargetPart = v end
-})
-ExtraTab:CreateSlider({ Name = "FOV Size", Range = {20, 500}, Increment = 10, CurrentValue = 100, Flag = "AutoShootFOVSize", Callback = function(v) autoShootConfig.fovSize = v end })
-ExtraTab:CreateColorPicker({ Name = "FOV Color", Color = Color3.fromRGB(255, 255, 255), Flag = "AutoShootFOVColor", Callback = function(v) autoShootConfig.fovColor = v end })
-ExtraTab:CreateSlider({ Name = "Shoot Delay", Range = {0.01, 3}, Increment = 0.01, CurrentValue = 0.08, Flag = "ShootDelay", Callback = function(v) autoShootDelay = v end })
 
 ExtraTab:CreateSection("Invisibility")
 ExtraTab:CreateToggle({ Name = "Auto-Give Cloak", Flag = "AutoGiveCloak", CurrentValue = false, Callback = function(v) AutoGiveCloak = v end })
