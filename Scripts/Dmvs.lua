@@ -1677,6 +1677,93 @@ local function mainLoop()
     end
 end
 
+local originalPlayerNames = {}
+local originalLocalName = nil
+local hideUsersActive = false
+local hideMyUserActive = false
+local customLocalName = ""
+
+local function getPlayerNameLabel(player)
+    local character = player.Character
+    if not character then return nil end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local headTag = hrp:FindFirstChild("HeadTag")
+    if not headTag then return nil end
+    local streak = headTag:FindFirstChild("Streak")
+    if not streak then return nil end
+    local nameLabel = streak:FindFirstChild("playerName")
+    return nameLabel
+end
+
+local function storeOriginalName(player)
+    if originalPlayerNames[player] then return end
+    local label = getPlayerNameLabel(player)
+    if label and label:IsA("TextLabel") then
+        originalPlayerNames[player] = label.Text
+    end
+end
+
+local function restorePlayerName(player)
+    local label = getPlayerNameLabel(player)
+    if label and originalPlayerNames[player] then
+        label.Text = originalPlayerNames[player]
+    end
+end
+
+local function setPlayerName(player, newName)
+    local label = getPlayerNameLabel(player)
+    if label then
+        label.Text = newName
+    end
+end
+
+local function applyHideUsers()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if hideUsersActive then
+            storeOriginalName(player)
+            local nameToSet = (player.UserId % 2 == 0) and "Synergy Hub #1" or "Synergy Hub #2"
+            setPlayerName(player, nameToSet)
+        else
+            restorePlayerName(player)
+        end
+    end
+end
+
+local function applyHideMyUser()
+    if hideMyUserActive and customLocalName ~= "" then
+        storeOriginalName(LocalPlayer)
+        setPlayerName(LocalPlayer, customLocalName)
+    else
+        restorePlayerName(LocalPlayer)
+    end
+end
+
+local function onCharacterAdded(player, character)
+    task.wait(0.2)
+    if player == LocalPlayer then
+        if hideMyUserActive and customLocalName ~= "" then
+            storeOriginalName(player)
+            setPlayerName(player, customLocalName)
+        end
+    else
+        if hideUsersActive then
+            storeOriginalName(player)
+            local nameToSet = (player.UserId % 2 == 0) and "Synergy Hub #1" or "Synergy Hub #2"
+            setPlayerName(player, nameToSet)
+        end
+    end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    player.CharacterAdded:Connect(function(char) onCharacterAdded(player, char) end)
+    if player.Character then onCharacterAdded(player, player.Character) end
+end
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(char) onCharacterAdded(player, char) end)
+end)
+
 local window = SynergyUI:CreateWindow({
     Title = "Synergy Hub - Dmvs",
     ToggleKey = Enum.KeyCode.X,
@@ -1684,6 +1771,7 @@ local window = SynergyUI:CreateWindow({
 })
 
 local InfoTab = window:CreateTab("Information")
+local SecurityTab = window:CreateTab("Security")
 local AimbotTab = window:CreateTab("Aimbot")
 local SilentAimTab = window:CreateTab("Silent Aim")
 local TriggerBotTab = window:CreateTab("Trigger Bot")
@@ -1703,6 +1791,38 @@ InfoTab:CreateKeybind({
     Flag = "MenuKeybind",
     Callback = function(key)
         window.Gui.Enabled = not window.Gui.Enabled
+    end
+})
+
+SecurityTab:CreateSection("Name Hiding")
+SecurityTab:CreateToggle({
+    Name = "Hide Users Of Players",
+    Flag = "HideUsersOfPlayers",
+    CurrentValue = false,
+    Callback = function(v)
+        hideUsersActive = v
+        applyHideUsers()
+    end
+})
+SecurityTab:CreateToggle({
+    Name = "Hide my user",
+    Flag = "HideMyUser",
+    CurrentValue = false,
+    Callback = function(v)
+        hideMyUserActive = v
+        applyHideMyUser()
+    end
+})
+SecurityTab:CreateTextInput({
+    Name = "Custom Name",
+    Placeholder = "Enter your custom name...",
+    CurrentText = "",
+    Flag = "CustomLocalName",
+    Callback = function(text)
+        customLocalName = text
+        if hideMyUserActive then
+            applyHideMyUser()
+        end
     end
 })
 
