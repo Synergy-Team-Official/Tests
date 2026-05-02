@@ -1,0 +1,561 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+local SoundService = game:GetService("SoundService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+local function SanitizeName(str) return tostring(str):gsub("%s+", "") end
+
+local GlobalGameInfo = { AlivePlayersFolder = nil, PlayerTeamName = nil, CurrentGameFolder = nil, LastCheckTime = 0, MyTeam = nil, EnemyTeam = nil }
+
+local function UpdateGlobalGameInfo()
+    local runningGames = Workspace:FindFirstChild("RunningGames")
+    if not runningGames then return end
+    local foundGame = nil
+    local foundAliveParams = nil
+    local foundTeam = nil
+    for _, gameFolder in ipairs(runningGames:GetChildren()) do
+        local aliveParams = gameFolder:FindFirstChild("AlivePlayers")
+        if aliveParams and aliveParams:IsA("Folder") then
+            if aliveParams:FindFirstChild("TeamBlue") and aliveParams.TeamBlue:FindFirstChild(LocalPlayer.Name) then
+                foundGame = gameFolder
+                foundAliveParams = aliveParams
+                foundTeam = "TeamBlue"
+                break
+            elseif aliveParams:FindFirstChild("TeamRed") and aliveParams.TeamRed:FindFirstChild(LocalPlayer.Name) then
+                foundGame = gameFolder
+                foundAliveParams = aliveParams
+                foundTeam = "TeamRed"
+                break
+            end
+        end
+    end
+    if foundGame and foundAliveParams then
+        GlobalGameInfo.AlivePlayersFolder = foundAliveParams
+        GlobalGameInfo.PlayerTeamName = foundTeam
+        GlobalGameInfo.CurrentGameFolder = foundGame
+        GlobalGameInfo.MyTeam = foundTeam
+        GlobalGameInfo.EnemyTeam = (foundTeam == "TeamBlue") and "TeamRed" or "TeamBlue"
+    else
+        GlobalGameInfo.AlivePlayersFolder = nil
+        GlobalGameInfo.PlayerTeamName = nil
+        GlobalGameInfo.CurrentGameFolder = nil
+        GlobalGameInfo.MyTeam = nil
+        GlobalGameInfo.EnemyTeam = nil
+    end
+end
+
+local function IsTeammateGlobal(targetPlayer)
+    if targetPlayer == LocalPlayer then return true end
+    local currentTime = tick()
+    if (currentTime - GlobalGameInfo.LastCheckTime) > 0.5 then
+        GlobalGameInfo.LastCheckTime = currentTime
+        UpdateGlobalGameInfo()
+    end
+    if GlobalGameInfo.AlivePlayersFolder and GlobalGameInfo.PlayerTeamName then
+        local myTeamFolder = GlobalGameInfo.AlivePlayersFolder:FindFirstChild(GlobalGameInfo.PlayerTeamName)
+        if myTeamFolder and myTeamFolder:FindFirstChild(SanitizeName(targetPlayer.Name)) then
+            return true
+        end
+        local enemyTeamFolder = GlobalGameInfo.AlivePlayersFolder:FindFirstChild(GlobalGameInfo.EnemyTeam)
+        if enemyTeamFolder and enemyTeamFolder:FindFirstChild(SanitizeName(targetPlayer.Name)) then
+            return false
+        end
+    end
+    return false
+end
+
+local function GetEnemyPlayersList()
+    local enemies = {}
+    UpdateGlobalGameInfo()
+    if GlobalGameInfo.AlivePlayersFolder and GlobalGameInfo.EnemyTeam then
+        local enemyTeamFolder = GlobalGameInfo.AlivePlayersFolder:FindFirstChild(GlobalGameInfo.EnemyTeam)
+        if enemyTeamFolder then
+            for _, nameValue in ipairs(enemyTeamFolder:GetChildren()) do
+                local player = Players:FindFirstChild(nameValue.Name)
+                if player and player ~= LocalPlayer then
+                    table.insert(enemies, player)
+                end
+            end
+        end
+    end
+    return enemies
+end
+
+local function GetComponent(instance, componentName)
+    return instance:FindFirstChild(componentName)
+end
+
+local function GetCurrentWeapon()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") and tool:FindFirstChild("fire") and tool:FindFirstChild("showBeam") then
+            return tool
+        end
+    end
+    return nil
+end
+
+local function HasGunEquipped()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    local tool = char:FindFirstChildOfClass("Tool")
+    if not tool then return false end
+    local isGun = tool:FindFirstChild("showBeam") and tool.showBeam:IsA("RemoteEvent")
+    return isGun
+end
+
+local function IsAlive(player)
+    local char = player.Character
+    if not char then return false end
+    local humanoid = char:FindFirstChild("Humanoid")
+    return humanoid and humanoid.Health > 0
+end
+
+local function GetPlayerUnderMouse()
+    local camera = Workspace.CurrentCamera
+    local mousePos = UserInputService:GetMouseLocation()
+    local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {LocalPlayer.Character}
+    params.IgnoreWater = true
+    local hit = Workspace:Raycast(ray.Origin, ray.Direction * 500, params)
+    if not hit then return nil end
+    local character = hit.Instance:FindFirstAncestorWhichIsA("Model")
+    if not character then return nil end
+    local player = Players:GetPlayerFromCharacter(character)
+    if not player then return nil end
+    return player, hit.Position
+end
+
+local triggerbotEnabled = false
+local triggerbotDelay = 0.05
+local lastTriggerShot = tick()
+local globalLastShotTime = 0
+local globalShotCooldown = 3
+local tbBlockShootNormal = false
+local tbBlockShootInverted = false
+local activeWeapon = nil
+local weaponActive = false
+local triggerbotConnection = nil
+
+local function SetWeaponScriptsDisabled(weapon, disabled)
+    if not weapon or not weapon.Parent then return end
+    local descendants = weapon:GetDescendants()
+    table.insert(descendants, weapon)
+    for _, obj in ipairs(descendants) do
+        if obj and (obj:IsA("Script") or obj:IsA("LocalScript")) and obj:IsDescendantOf(weapon) then
+            pcall(function() obj.Disabled = disabled end)
+        end
+    end
+end
+
+local function UpdateWeaponScripts()
+    if not activeWeapon or not activeWeapon.Parent or not activeWeapon:IsDescendantOf(game) then
+        local char = LocalPlayer.Character
+        if char then
+            for _, tool in ipairs(char:GetChildren()) do
+                if tool:IsA("Tool") and tool:FindFirstChild("fire") and tool:FindFirstChild("showBeam") then
+                    activeWeapon = tool
+                    weaponActive = true
+                    break
+                end
+            end
+        end
+        if not activeWeapon then weaponActive = false; return end
+    end
+    if not activeWeapon or not activeWeapon.Parent then weaponActive = false; activeWeapon = nil; return end
+    local shouldDisable = false
+    if tbBlockShootNormal then shouldDisable = true end
+    if tbBlockShootInverted then
+        local enemies = GetEnemyPlayersList()
+        local enemyVisible = false
+        for _, enemy in ipairs(enemies) do
+            local char = enemy.Character
+            if char then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local camera = Workspace.CurrentCamera
+                    local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+                    if onScreen then
+                        local params = RaycastParams.new()
+                        params.FilterType = Enum.RaycastFilterType.Exclude
+                        params.FilterDescendantsInstances = {LocalPlayer.Character}
+                        local ray = Workspace:Raycast(camera.CFrame.Position, (hrp.Position - camera.CFrame.Position).Unit * (camera.CFrame.Position - hrp.Position).Magnitude, params)
+                        if not ray or ray.Instance:IsDescendantOf(enemy.Character) then
+                            enemyVisible = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        if enemyVisible then shouldDisable = true end
+    end
+    SetWeaponScriptsDisabled(activeWeapon, shouldDisable)
+end
+
+local function InitializeWeapon()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") and tool:FindFirstChild("fire") and tool:FindFirstChild("showBeam") then
+            activeWeapon = tool
+            weaponActive = true
+            UpdateWeaponScripts()
+            return true
+        end
+    end
+    activeWeapon = nil
+    weaponActive = false
+    return false
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    activeWeapon = nil
+    weaponActive = false
+    task.wait(1.5)
+    InitializeWeapon()
+    char.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") and child:FindFirstChild("fire") and child:FindFirstChild("showBeam") then
+            task.wait(0.1)
+            activeWeapon = child
+            weaponActive = true
+            UpdateWeaponScripts()
+        end
+    end)
+    char.ChildRemoved:Connect(function(child)
+        if child == activeWeapon then
+            weaponActive = false
+            activeWeapon = nil
+            task.wait(0.1)
+            InitializeWeapon()
+        end
+    end)
+end)
+
+RunService.Heartbeat:Connect(function()
+    if activeWeapon and not activeWeapon:IsDescendantOf(game) then
+        activeWeapon = nil
+        weaponActive = false
+    end
+    if tbBlockShootNormal or tbBlockShootInverted then
+        if activeWeapon and activeWeapon.Parent then
+            UpdateWeaponScripts()
+        end
+    end
+end)
+
+local function PerformTriggerShot()
+    if not triggerbotEnabled then return end
+    if not HasGunEquipped() then return end
+    local currentTime = tick()
+    if (currentTime - globalLastShotTime) < globalShotCooldown then return end
+    if currentTime - lastTriggerShot < triggerbotDelay then return end
+    local targetPlayer, hitPoint = GetPlayerUnderMouse()
+    if not targetPlayer then return end
+    if targetPlayer == LocalPlayer then return end
+    if IsTeammateGlobal(targetPlayer) then return end
+    if not IsAlive(targetPlayer) then return end
+    local weapon = GetCurrentWeapon()
+    if not weapon then return end
+    local handle = weapon:FindFirstChild("Handle") or weapon
+    if not handle then return end
+    local direction = (hitPoint - handle.Position).Unit
+    local fireEvent = GetComponent(weapon, "fire")
+    local beamEvent = GetComponent(weapon, "showBeam")
+    local killEvent = GetComponent(weapon, "kill")
+    local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+    local localBeam = nil
+    if ReplicatedStorage:FindFirstChild("BindableEvents") then
+        localBeam = ReplicatedStorage.BindableEvents:FindFirstChild("LocalBeam")
+    end
+    task.spawn(function()
+        if localBeam then localBeam:Fire(handle, hitPoint) end
+        if fireEvent then fireEvent:FireServer() end
+        if beamEvent then beamEvent:FireServer(hitPoint, handle.Position, handle) end
+        if killEvent then killEvent:FireServer(targetPlayer, direction, hitPoint) end
+    end)
+    globalLastShotTime = currentTime
+    lastTriggerShot = currentTime
+end
+
+local function startTriggerbot()
+    if triggerbotConnection then return end
+    triggerbotConnection = RunService.RenderStepped:Connect(PerformTriggerShot)
+end
+
+local function stopTriggerbot()
+    if triggerbotConnection then
+        triggerbotConnection:Disconnect()
+        triggerbotConnection = nil
+    end
+end
+
+local function setTriggerbotState(state)
+    triggerbotEnabled = state
+    if state then
+        lastTriggerShot = tick()
+        startTriggerbot()
+    else
+        stopTriggerbot()
+    end
+end
+
+local guiEnabled = false
+local guiMain = nil
+local guiToggleConnection = nil
+local rebindingTriggerKey = false
+local triggerToggleKey = Enum.KeyCode.V
+local savedTriggerKey = "V"
+
+local function createGUI()
+    if guiMain then guiMain:Destroy() end
+    guiMain = Instance.new("ScreenGui")
+    guiMain.Name = "TriggerbotGUI"
+    guiMain.ResetOnSpawn = false
+    guiMain.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    guiMain.Parent = (RunService:IsStudio() and LocalPlayer:WaitForChild("PlayerGui")) or CoreGui
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 300, 0, 280)
+    mainFrame.Position = UDim2.new(0.5, -150, 0.5, -140)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    mainFrame.BackgroundTransparency = 0.1
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Active = true
+    mainFrame.Draggable = true
+    mainFrame.Parent = guiMain
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = mainFrame
+    local titleBar = Instance.new("Frame")
+    titleBar.Size = UDim2.new(1, 0, 0, 30)
+    titleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    titleBar.BorderSizePixel = 0
+    titleBar.Parent = mainFrame
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, 8)
+    titleCorner.Parent = titleBar
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -30, 1, 0)
+    titleLabel.Position = UDim2.new(0, 10, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "Synergy Team - Triggerbot"
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.TextSize = 16
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.Parent = titleBar
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 30, 1, 0)
+    closeBtn.Position = UDim2.new(1, -30, 0, 0)
+    closeBtn.BackgroundTransparency = 1
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.TextSize = 18
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.Parent = titleBar
+    closeBtn.MouseButton1Click:Connect(function()
+        guiEnabled = false
+        guiMain.Enabled = false
+    end)
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Size = UDim2.new(1, -20, 1, -50)
+    contentFrame.Position = UDim2.new(0, 10, 0, 40)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Parent = mainFrame
+    local enableToggleBtn = Instance.new("TextButton")
+    enableToggleBtn.Size = UDim2.new(1, 0, 0, 35)
+    enableToggleBtn.Position = UDim2.new(0, 0, 0, 0)
+    enableToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    enableToggleBtn.Text = "Enable Triggerbot: OFF"
+    enableToggleBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    enableToggleBtn.TextSize = 14
+    enableToggleBtn.Font = Enum.Font.Gotham
+    enableToggleBtn.AutoButtonColor = false
+    enableToggleBtn.Parent = contentFrame
+    local enableCorner = Instance.new("UICorner")
+    enableCorner.CornerRadius = UDim.new(0, 4)
+    enableCorner.Parent = enableToggleBtn
+    local blockShootNormalBtn = Instance.new("TextButton")
+    blockShootNormalBtn.Size = UDim2.new(1, 0, 0, 35)
+    blockShootNormalBtn.Position = UDim2.new(0, 0, 0, 45)
+    blockShootNormalBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    blockShootNormalBtn.Text = "Block Shoot: OFF"
+    blockShootNormalBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    blockShootNormalBtn.TextSize = 14
+    blockShootNormalBtn.Font = Enum.Font.Gotham
+    blockShootNormalBtn.AutoButtonColor = false
+    blockShootNormalBtn.Parent = contentFrame
+    local blockNormalCorner = Instance.new("UICorner")
+    blockNormalCorner.CornerRadius = UDim.new(0, 4)
+    blockNormalCorner.Parent = blockShootNormalBtn
+    local blockShootInvertedBtn = Instance.new("TextButton")
+    blockShootInvertedBtn.Size = UDim2.new(1, 0, 0, 35)
+    blockShootInvertedBtn.Position = UDim2.new(0, 0, 0, 90)
+    blockShootInvertedBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    blockShootInvertedBtn.Text = "Block Shoot Inverted: OFF"
+    blockShootInvertedBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    blockShootInvertedBtn.TextSize = 14
+    blockShootInvertedBtn.Font = Enum.Font.Gotham
+    blockShootInvertedBtn.AutoButtonColor = false
+    blockShootInvertedBtn.Parent = contentFrame
+    local blockInvertedCorner = Instance.new("UICorner")
+    blockInvertedCorner.CornerRadius = UDim.new(0, 4)
+    blockInvertedCorner.Parent = blockShootInvertedBtn
+    local reactionSliderFrame = Instance.new("Frame")
+    reactionSliderFrame.Size = UDim2.new(1, 0, 0, 45)
+    reactionSliderFrame.Position = UDim2.new(0, 0, 0, 135)
+    reactionSliderFrame.BackgroundTransparency = 1
+    reactionSliderFrame.Parent = contentFrame
+    local sliderLabel = Instance.new("TextLabel")
+    sliderLabel.Size = UDim2.new(0.5, -5, 1, 0)
+    sliderLabel.Position = UDim2.new(0, 0, 0, 0)
+    sliderLabel.BackgroundTransparency = 1
+    sliderLabel.Text = "Reaction Time: " .. string.format("%.2f", triggerbotDelay)
+    sliderLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    sliderLabel.TextSize = 13
+    sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+    sliderLabel.Font = Enum.Font.Gotham
+    sliderLabel.Parent = reactionSliderFrame
+    local sliderValue = Instance.new("TextBox")
+    sliderValue.Size = UDim2.new(0.3, -5, 0.7, 0)
+    sliderValue.Position = UDim2.new(0.7, 0, 0.15, 0)
+    sliderValue.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    sliderValue.Text = tostring(triggerbotDelay)
+    sliderValue.TextColor3 = Color3.fromRGB(255, 255, 255)
+    sliderValue.TextSize = 14
+    sliderValue.Font = Enum.Font.Gotham
+    sliderValue.PlaceholderText = "0.01 - 3"
+    sliderValue.Parent = reactionSliderFrame
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 4)
+    sliderCorner.Parent = sliderValue
+    local keybindFrame = Instance.new("Frame")
+    keybindFrame.Size = UDim2.new(1, 0, 0, 35)
+    keybindFrame.Position = UDim2.new(0, 0, 0, 190)
+    keybindFrame.BackgroundTransparency = 1
+    keybindFrame.Parent = contentFrame
+    local keybindLabel = Instance.new("TextLabel")
+    keybindLabel.Size = UDim2.new(0.5, -5, 1, 0)
+    keybindLabel.Position = UDim2.new(0, 0, 0, 0)
+    keybindLabel.BackgroundTransparency = 1
+    keybindLabel.Text = "Triggerbot Keybind: " .. savedTriggerKey
+    keybindLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    keybindLabel.TextSize = 13
+    keybindLabel.TextXAlignment = Enum.TextXAlignment.Left
+    keybindLabel.Font = Enum.Font.Gotham
+    keybindLabel.Parent = keybindFrame
+    local rebindBtn = Instance.new("TextButton")
+    rebindBtn.Size = UDim2.new(0.4, 0, 0.8, 0)
+    rebindBtn.Position = UDim2.new(0.6, 0, 0.1, 0)
+    rebindBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    rebindBtn.Text = "Rebind"
+    rebindBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    rebindBtn.TextSize = 12
+    rebindBtn.Font = Enum.Font.Gotham
+    rebindBtn.Parent = keybindFrame
+    local rebindCorner = Instance.new("UICorner")
+    rebindCorner.CornerRadius = UDim.new(0, 4)
+    rebindCorner.Parent = rebindBtn
+    local function updateEnableButton()
+        enableToggleBtn.Text = triggerbotEnabled and "Enable Triggerbot: ON" or "Enable Triggerbot: OFF"
+        enableToggleBtn.BackgroundColor3 = triggerbotEnabled and Color3.fromRGB(0, 128, 0) or Color3.fromRGB(60, 60, 60)
+    end
+    local function updateBlockNormalButton()
+        blockShootNormalBtn.Text = tbBlockShootNormal and "Block Shoot: ON" or "Block Shoot: OFF"
+        blockShootNormalBtn.BackgroundColor3 = tbBlockShootNormal and Color3.fromRGB(128, 0, 0) or Color3.fromRGB(60, 60, 60)
+    end
+    local function updateBlockInvertedButton()
+        blockShootInvertedBtn.Text = tbBlockShootInverted and "Block Shoot Inverted: ON" or "Block Shoot Inverted: OFF"
+        blockShootInvertedBtn.BackgroundColor3 = tbBlockShootInverted and Color3.fromRGB(128, 0, 0) or Color3.fromRGB(60, 60, 60)
+    end
+    enableToggleBtn.MouseButton1Click:Connect(function()
+        setTriggerbotState(not triggerbotEnabled)
+        updateEnableButton()
+    end)
+    blockShootNormalBtn.MouseButton1Click:Connect(function()
+        tbBlockShootNormal = not tbBlockShootNormal
+        updateBlockNormalButton()
+        if activeWeapon then UpdateWeaponScripts() end
+    end)
+    blockShootInvertedBtn.MouseButton1Click:Connect(function()
+        tbBlockShootInverted = not tbBlockShootInverted
+        updateBlockInvertedButton()
+        if activeWeapon then UpdateWeaponScripts() end
+    end)
+    sliderValue.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local newVal = tonumber(sliderValue.Text)
+            if newVal and newVal >= 0.01 and newVal <= 3 then
+                triggerbotDelay = newVal
+                sliderLabel.Text = "Reaction Time: " .. string.format("%.2f", triggerbotDelay)
+                sliderValue.Text = tostring(triggerbotDelay)
+            else
+                sliderValue.Text = tostring(triggerbotDelay)
+            end
+        end
+    end)
+    rebindBtn.MouseButton1Click:Connect(function()
+        rebindingTriggerKey = true
+        rebindBtn.Text = "Press any key..."
+        task.spawn(function()
+            local connection
+            connection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if rebindingTriggerKey then
+                    local key = input.KeyCode
+                    if key ~= Enum.KeyCode.Unknown then
+                        triggerToggleKey = key
+                        savedTriggerKey = key.Name
+                        keybindLabel.Text = "Triggerbot Keybind: " .. savedTriggerKey
+                        rebindingTriggerKey = false
+                        rebindBtn.Text = "Rebind"
+                    end
+                    connection:Disconnect()
+                end
+            end)
+            task.wait(5)
+            if rebindingTriggerKey then
+                rebindingTriggerKey = false
+                rebindBtn.Text = "Rebind"
+            end
+        end)
+    end)
+    updateEnableButton()
+    updateBlockNormalButton()
+    updateBlockInvertedButton()
+end
+
+guiToggleConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.X then
+        guiEnabled = not guiEnabled
+        if guiMain then
+            guiMain.Enabled = guiEnabled
+        else
+            createGUI()
+            guiMain.Enabled = guiEnabled
+        end
+    end
+    if not rebindingTriggerKey and input.KeyCode == triggerToggleKey then
+        setTriggerbotState(not triggerbotEnabled)
+        if guiMain and guiMain.Enabled then
+            local enableBtn = guiMain:FindFirstChild("Frame") and guiMain.Frame:FindFirstChild("Frame") and guiMain.Frame.Frame:FindFirstChild("Enable Triggerbot: OFF")
+            if enableBtn then
+                enableBtn.Text = triggerbotEnabled and "Enable Triggerbot: ON" or "Enable Triggerbot: OFF"
+                enableBtn.BackgroundColor3 = triggerbotEnabled and Color3.fromRGB(0, 128, 0) or Color3.fromRGB(60, 60, 60)
+            end
+        end
+    end
+end)
+
+createGUI()
+guiMain.Enabled = false
+InitializeWeapon()
